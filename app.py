@@ -7,6 +7,9 @@ Usage:
 
 Requires: PySide6, hidapi, pillow, numpy, sounddevice (optional)
 """
+from version import VERSION
+
+print(f"PolyWollyWin v{VERSION}")
 
 from __future__ import annotations
 
