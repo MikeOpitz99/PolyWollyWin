@@ -12,14 +12,24 @@ Usage:
 Requires: PySide6, hidapi, pillow, numpy, sounddevice (optional)
 """
 
-print(f"PolyWollyWin v{VERSION}")
-
-
-
 import sys
 import time
 import threading
+import json
+from urllib.request import urlopen
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QIcon
 from pathlib import Path
+
+APP_NAME = f"PolyWollyWin v{VERSION}"
+AUTHOR_NAME = "Mike Opitz"
+REPO_URL = "https://github.com/MikeOpitz99/PolyWollyWin"
+RELEASES_URL = f"{REPO_URL}/releases"
+LATEST_RELEASE_API = (
+    "https://api.github.com/repos/"
+    "MikeOpitz99/PolyWollyWin/releases/latest"
+)
 
 import numpy as np
 from PySide6.QtCore import (
@@ -33,15 +43,14 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QSlider, QComboBox,
     QFileDialog, QFrame, QTabWidget, QScrollArea,
-    QSizePolicy, QCheckBox,
-)
+    QSizePolicy, QCheckBox, QMessageBox,
+) 
 
 from transport import Transport
 from renderer  import GifPlayer, render_image, auto_fit_gif, blank_frame, logical_to_physical
 from effects   import make_effect, EFFECT_NAMES, AudioVisualizer, BaseEffect
 from paint     import PaintEditor
 
-APP_NAME    = "PolyWollyWin"
 TICK_HZ     = 30          # target frame rate
 TICK_MS     = 1000 // TICK_HZ
 SETTINGS_ORG = "PolyWollyWin"
@@ -206,6 +215,7 @@ class ControlWindow(QWidget):
 
     def __init__(self, driver: MatrixDriver):
         super().__init__()
+        self.setWindowIcon(QIcon("assets/pww.ico"))
         self._driver = driver
         self._last_gif_path = ""
 
@@ -222,11 +232,24 @@ class ControlWindow(QWidget):
         connect_btn.setFixedWidth(90)
         connect_btn.clicked.connect(self._on_connect)
 
+        repo_btn = QPushButton("GitHub")
+        repo_btn.setFixedWidth(90)
+        repo_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(REPO_URL))
+        )
+        update_btn = QPushButton("Check Updates")
+        update_btn.setFixedWidth(120)
+        update_btn.clicked.connect(
+            lambda: check_for_updates(self)
+        )
+        author_label = QLabel(f"by {AUTHOR_NAME}")
+        author_label.setStyleSheet("color: #666; font-size: 10px;")
+        
         status_row = QHBoxLayout()
         status_row.addWidget(self._status_label)
         status_row.addStretch()
         status_row.addWidget(connect_btn)
-
+        
         # Brightness
         self._brightness_slider = QSlider(Qt.Horizontal)
         self._brightness_slider.setRange(0, 100)
@@ -257,7 +280,52 @@ class ControlWindow(QWidget):
         root.addLayout(brightness_row)
         root.addWidget(_hline())
         root.addWidget(tabs)
+        root.addWidget(_hline())
 
+        footer_row = QHBoxLayout()
+        
+        version_label = QLabel(f"Version {VERSION}")
+        version_label.setStyleSheet("color: #666; font-size: 10px;")
+        
+        author_label = QLabel(f"by {AUTHOR_NAME}")
+        author_label.setStyleSheet("color: #666; font-size: 10px;")
+        
+        repo_btn = QPushButton("GitHub")
+        repo_btn.setFixedHeight(22)
+        repo_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(REPO_URL))
+        )
+
+        update_btn = QPushButton("Check Updates")
+        update_btn.setFixedHeight(22)
+        update_btn.clicked.connect(
+            lambda: check_for_updates(self)
+        )
+        
+        self._close_to_tray = QCheckBox("Close to tray")
+        self._close_to_tray.setChecked(True)
+        self._close_to_tray.setStyleSheet(
+            "color: #777; font-size: 10px;"
+        )
+
+        self._debug_label = QLabel()
+        self._debug_label.setStyleSheet(
+            "color: #666; font-size: 10px;"
+        )
+
+        footer_row.addWidget(self._close_to_tray)
+        footer_row.addSpacing(10)
+        footer_row.addWidget(version_label)
+        footer_row.addSpacing(10)
+        footer_row.addWidget(author_label)
+        footer_row.addSpacing(15)
+        footer_row.addWidget(self._debug_label)
+        footer_row.addStretch()
+        footer_row.addWidget(repo_btn)
+        footer_row.addWidget(update_btn)
+
+        root.addLayout(footer_row)
+        
         driver.status_changed.connect(self._on_status)
 
     # ── tabs ─────────────────────────────────────────────────────── #
@@ -415,11 +483,38 @@ class ControlWindow(QWidget):
         frame = self._paint_editor.canvas.get_physical()
         self._driver.set_mode_paint(frame)
 
+    # ── debug footer ─────────────────────────────────────────────── #
+
+    def update_debug_info(self, dt: float):
+        fps = int(1.0 / dt) if dt > 0 else 0
+
+        mode = self._driver.mode.upper()
+
+        connected = (
+            "Connected"
+            if self._driver._transport.connected
+            else "Disconnected"
+        )
+
+        git_hash = "91d1476"
+
+        self._debug_label.setText(
+            f"Device: {connected}   "
+            f"FPS: {fps}   "
+            f"Mode: {mode}   "
+            f"Git: {git_hash}"
+        )
+
     # ── window close = hide to tray ──────────────────────────────── #
 
     def closeEvent(self, event):
-        event.ignore()
-        self.hide()
+        if self._close_to_tray.isChecked():
+            event.ignore()
+            self.hide()
+        else:
+            self._driver.cleanup()
+            QApplication.quit()
+
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -432,7 +527,6 @@ class TrayApp(QSystemTrayIcon):
         super().__init__(_make_tray_icon())
         self._driver = driver
         self._window = window
-
         self.setToolTip(APP_NAME)
         menu = QMenu()
 
@@ -529,12 +623,66 @@ def _hline() -> QFrame:
     return line
 
 
+def check_for_updates(parent=None, silent=False):
+    try:
+        with urlopen(LATEST_RELEASE_API, timeout=5) as response:
+            data = json.loads(response.read().decode())
+
+        latest = data["tag_name"].replace("v", "").strip()
+        current = VERSION.strip()
+
+        if latest != current:
+            msg = QMessageBox(parent)
+            msg.setWindowTitle("Update Available")
+            msg.setText(
+                f"A newer version is available.\n\n"
+                f"Current: v{current}\n"
+                f"Latest: v{latest}"
+            )
+
+            download_btn = msg.addButton(
+                "Open Releases",
+                QMessageBox.AcceptRole
+            )
+
+            msg.addButton(QMessageBox.Close)
+
+            msg.exec()
+
+            if msg.clickedButton() == download_btn:
+                QDesktopServices.openUrl(QUrl(RELEASES_URL))
+
+        elif not silent:
+            QMessageBox.information(
+                parent,
+                "No Updates",
+                f"You are running the latest version:\n\nv{current}"
+            )
+
+    except Exception as e:
+        if not silent:
+            msg = str(e)
+
+            if "404" in msg:
+                msg = (
+                    "No GitHub releases exist yet.\n\n"
+                    "Publish a release first."
+                )
+
+            QMessageBox.warning(
+                parent,
+                "Update Check Failed",
+                msg
+            )
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────────────
 
 def main():
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon("assets/pww.ico"))
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)
 
@@ -544,6 +692,10 @@ def main():
 
     driver = MatrixDriver()
     window = ControlWindow(driver)
+    QTimer.singleShot(
+        3000,
+        lambda: check_for_updates(window, silent=True)
+    )
     tray   = TrayApp(driver, window)
     tray.show()
 
@@ -557,7 +709,7 @@ def main():
         dt  = now - _last[0]
         _last[0] = now
         driver.tick(dt)
-
+        window.update_debug_info(dt)
     timer.timeout.connect(_tick)
     timer.start()
 
