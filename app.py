@@ -1,5 +1,9 @@
+from __future__ import annotations
+
+from version import VERSION
+
 """
-app.py — PolyWolly system tray app
+app.py — PolyWollyWin system tray app
 ROG Strix Flare II Animate custom matrix controller.
 
 Usage:
@@ -7,11 +11,10 @@ Usage:
 
 Requires: PySide6, hidapi, pillow, numpy, sounddevice (optional)
 """
-from version import VERSION
 
 print(f"PolyWollyWin v{VERSION}")
 
-from __future__ import annotations
+
 
 import sys
 import time
@@ -38,10 +41,10 @@ from renderer  import GifPlayer, render_image, auto_fit_gif, blank_frame, logica
 from effects   import make_effect, EFFECT_NAMES, AudioVisualizer, BaseEffect
 from paint     import PaintEditor
 
-APP_NAME    = "PolyWolly"
+APP_NAME    = "PolyWollyWin"
 TICK_HZ     = 30          # target frame rate
 TICK_MS     = 1000 // TICK_HZ
-SETTINGS_ORG = "PolyWolly"
+SETTINGS_ORG = "PolyWollyWin"
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -433,7 +436,7 @@ class TrayApp(QSystemTrayIcon):
         self.setToolTip(APP_NAME)
         menu = QMenu()
 
-        show_act = QAction("Open PolyWolly", menu)
+        show_act = QAction("Open PolyWollyWin", menu)
         show_act.triggered.connect(window.show)
         menu.addAction(show_act)
 

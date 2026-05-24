@@ -1,4 +1,4 @@
-# PolyWolly
+# PolyWollyWin
 
 Custom matrix controller for the **ROG Strix Flare II Animate** keyboard.  
 Bypasses Armoury Crate entirely — direct HID control.
@@ -51,7 +51,7 @@ LED order: row-major scan of physical LEDs (mask applied)
 ## Build standalone .exe
 
 ```
-pyinstaller --noconsole --onefile --name PolyWolly app.py
+pyinstaller --noconsole --onefile --name PolyWollyWin app.py
 ```
 
 The `--noconsole` flag suppresses the terminal window on launch.
@@ -60,7 +60,7 @@ The `--noconsole` flag suppresses the terminal window on launch.
 
 ## Adding custom GIFs
 
-1. Open PolyWolly → **GIF / Image** tab → Browse…
+1. Open PolyWollyWin → **GIF / Image** tab → Browse…
 2. Select any GIF — it auto-fits to the 37×12 display
 3. Click **▶ Play**
 
