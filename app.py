@@ -12,14 +12,13 @@ Usage:
 Requires: PySide6, hidapi, pillow, numpy, sounddevice (optional)
 """
 
-print(f"PolyWollyWin v{VERSION}")
-
-
-
 import sys
 import time
 import threading
+from PySide6.QtGui import QIcon
 from pathlib import Path
+
+APP_NAME = f"PolyWollyWin v{VERSION}"
 
 import numpy as np
 from PySide6.QtCore import (
@@ -86,6 +85,7 @@ class MatrixDriver(QObject):
 
     def __init__(self):
         super().__init__()
+        self.setWindowIcon(QIcon("assets/pww.ico"))
         self._transport = Transport()
         self._lock      = threading.Lock()
         self._running   = False
@@ -535,6 +535,7 @@ def _hline() -> QFrame:
 
 def main():
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon("assets/pww.ico"))
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)
 
