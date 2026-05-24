@@ -32,3 +32,6 @@
 Initial public release. 
 ## v2.0.1 
 - added an installer 
+ 
+## v2.0.1 
+- Updating release version 2.0.1 
