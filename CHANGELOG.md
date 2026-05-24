@@ -38,3 +38,6 @@ Initial public release.
  
 ## v2.0.1 
 - Updating for Release and install 
+ 
+## v2.0.1 
+- Updating for release and proper installation 
