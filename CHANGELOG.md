@@ -41,3 +41,18 @@ Initial public release.
  
 ## v2.0.1 
 - Updating for release and proper installation 
+ 
+## v2.0.1 
+- Testing for final public consumption 
+ 
+## v2.02 
+- Updating release plan and installer 
+ 
+## v2.02 
+- Fixing zips 
+ 
+## v2.02 
+- Incluing inno as install creation tool 
+ 
+## v2.02 
+- fixing release scripts 

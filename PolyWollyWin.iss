@@ -1,11 +1,11 @@
 #define MyAppName "PolyWollyWin"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.02"
 #define MyAppPublisher "Mike Opitz"
 #define MyAppURL "https://github.com/MikeOpitz99/PolyWollyWin"
 #define MyAppExeName "PolyWollyWin.exe"
 
 [Setup]
-AppId={{B9F2A3C1-4D7E-4F8A-9B2C-1E3D5F7A9B0C}
+AppId={{B9F2A3C1-4D7E-4F8A-9B2C-1E3D5F7A9B0C}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -21,6 +21,7 @@ SetupIconFile=assets\pww.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+ArchitecturesInstallIn64BitMode=x64
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 PrivilegesRequired=lowest
@@ -30,6 +31,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "startup"; Description: "Run {#MyAppName} when Windows starts"; GroupDescription: "Windows Startup:"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
@@ -42,20 +44,21 @@ Source: "CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\pww.ico"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\pww.ico"; Tasks: desktopicon
 
-[Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
-
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
-  ValueType: string; ValueName: "{#MyAppName}"; \
-  ValueData: """{app}\{#MyAppExeName}"""; \
-  Flags: uninsdeletevalue; Tasks: startup
+    ValueType: string; ValueName: "{#MyAppName}"; \
+    ValueData: """{app}\{#MyAppExeName}"""; \
+    Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; \
+    Description: "Launch {#MyAppName}"; \
+    Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "taskkill"; Parameters: "/f /im {#MyAppExeName}"; Flags: runhidden
+Filename: "taskkill"; \
+    Parameters: "/f /im {#MyAppExeName}"; \
+    Flags: runhidden
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
