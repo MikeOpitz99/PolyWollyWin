@@ -59,3 +59,6 @@ Initial public release.
  
 ## v2.02 
 - ready 
+ 
+## v2.0.3 
+- Normalizing 
