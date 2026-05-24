@@ -1,0 +1,6 @@
+PySide6>=6.6
+hidapi>=0.14
+Pillow>=10.0
+numpy>=1.24
+sounddevice>=0.4.6    # optional — AudioVisualizer degrades gracefully without it
+pyinstaller>=6.0      # optional — for building the .exe
