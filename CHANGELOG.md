@@ -62,3 +62,6 @@ Initial public release.
  
 ## v2.0.3 
 - Normalizing 
+ 
+## v2.0.3 
+- adding persistent saves, including fixes for first party effects 

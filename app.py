@@ -25,7 +25,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 import numpy as np
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QObject
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QObject, QSettings
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu,
@@ -57,6 +57,44 @@ LATEST_RELEASE_API = (
 
 TICK_HZ = 30
 TICK_MS = 1000 // TICK_HZ
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Settings persistence
+# ─────────────────────────────────────────────────────────────────────
+
+class Settings:
+    """Persists PolyWollyWin state to registry (Windows) / ini (other)."""
+    _ORG = "PolyWollyWin"
+    _APP = "PolyWollyWin"
+
+    def __init__(self):
+        self._s = QSettings(self._ORG, self._APP)
+
+    def get_brightness(self)      -> int:  return int(self._s.value("brightness", 100))
+    def get_contrast(self)        -> int:  return int(self._s.value("contrast", 100))
+    def get_last_effect(self)     -> str:  return str(self._s.value("last_effect", ""))
+    def get_last_gif(self)        -> str:  return str(self._s.value("last_gif", ""))
+    def get_gif_ox(self)          -> int:  return int(self._s.value("gif_ox", -49))
+    def get_gif_oy(self)          -> int:  return int(self._s.value("gif_oy", -18))
+    def get_gif_scale(self)       -> int:  return int(self._s.value("gif_scale", 41))
+    def get_close_to_tray(self)   -> bool: return self._s.value("close_to_tray", "true").lower() == "true"
+    def get_persist_enabled(self) -> bool: return self._s.value("persist_enabled", "false").lower() == "true"
+    def get_last_mode(self)       -> str:  return str(self._s.value("last_mode", ""))
+
+    def set_brightness(self, v: int):        self._s.setValue("brightness", v)
+    def set_contrast(self, v: int):          self._s.setValue("contrast", v)
+    def set_last_effect(self, v: str):       self._s.setValue("last_effect", v)
+    def set_last_gif(self, v: str):          self._s.setValue("last_gif", v)
+    def set_gif_ox(self, v: int):            self._s.setValue("gif_ox", v)
+    def set_gif_oy(self, v: int):            self._s.setValue("gif_oy", v)
+    def set_gif_scale(self, v: int):         self._s.setValue("gif_scale", v)
+    def set_close_to_tray(self, v: bool):    self._s.setValue("close_to_tray", str(v).lower())
+    def set_persist_enabled(self, v: bool):  self._s.setValue("persist_enabled", str(v).lower())
+    def set_last_mode(self, v: str):         self._s.setValue("last_mode", v)
+
+    def save_all(self): self._s.sync()
+    def clear(self):    self._s.clear(); self._s.sync()
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -194,9 +232,22 @@ class QuickControls(QWidget):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
 
+        title_row = QHBoxLayout()
         title = QLabel("PolyWollyWin  Quick Controls")
         title.setStyleSheet("color:#e8001d; font-size:12px; font-weight:bold;")
-        layout.addWidget(title)
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(20, 20)
+        close_btn.setObjectName("qc_close_btn")
+        close_btn.setStyleSheet(
+            "QPushButton#qc_close_btn{background:#1a1a1a;color:#555;"
+            "border:none;font-size:11px;border-radius:3px;padding:0;}"
+            "QPushButton#qc_close_btn:hover{color:#fff;background:#e8001d;}"
+        )
+        close_btn.clicked.connect(self.hide)
+        title_row.addWidget(title)
+        title_row.addStretch()
+        title_row.addWidget(close_btn)
+        layout.addLayout(title_row)
         layout.addWidget(_sep())
 
         self._bc = BCBar()
@@ -225,8 +276,17 @@ class QuickControls(QWidget):
         self._bc.bri.setValue(int(bri * 100))
         self._bc.con.setValue(int(con * 100))
 
+    def show_near_tray(self):
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.move(screen.right() - self.width() - 8,
+                  screen.bottom() - self.height() - 8)
+        self.show(); self.raise_(); self.activateWindow()
+
     def focusOutEvent(self, event):
-        self.hide()
+        # Only hide if focus moved outside this widget tree
+        if not self.isAncestorOf(QApplication.focusWidget() or self):
+            self.hide()
+        super().focusOutEvent(event)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -295,6 +355,11 @@ class MatrixDriver(QObject):
     def set_mode_paint(self, frame: list[int]):
         with self._lock: self._static = frame; self.mode = self.MODE_PAINT
 
+    def current_effect_name(self) -> str:
+        """Return name of active effect, or empty string."""
+        with self._lock:
+            return self._effect.name if self._effect else ""
+
     def update_paint(self, frame: list[int]):
         with self._lock:
             if self.mode == self.MODE_PAINT: self._static = frame
@@ -335,9 +400,10 @@ class MatrixDriver(QObject):
 # ─────────────────────────────────────────────────────────────────────
 
 class GifTab(QWidget):
-    def __init__(self, driver: MatrixDriver):
+    def __init__(self, driver: MatrixDriver, settings: "Settings" = None):
         super().__init__()
         self._driver   = driver
+        self._settings = settings
         self._gif_path = ""
 
         layout = QVBoxLayout(self)
@@ -410,6 +476,27 @@ class GifTab(QWidget):
         layout.addWidget(img_group)
         layout.addStretch()
 
+    def save(self, settings: "Settings"):
+        settings.set_last_gif(self._gif_path)
+        settings.set_gif_ox(self._ox.value())
+        settings.set_gif_oy(self._oy.value())
+        settings.set_gif_scale(self._sc.value())
+
+    def restore(self, settings: "Settings"):
+        path = settings.get_last_gif()
+        if path and Path(path).exists():
+            self._gif_path = path
+            self._file_label.setText(Path(path).name)
+            self._file_label.setStyleSheet("color:#aaa; font-size:11px;")
+        self._ox.setValue(settings.get_gif_ox())
+        self._oy.setValue(settings.get_gif_oy())
+        self._sc.setValue(settings.get_gif_scale())
+        if self._gif_path:
+            self._preview_update()
+
+    def replay(self):
+        self._play()
+
     def _browse(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open GIF", "", "GIF files (*.gif)")
         if path:
@@ -470,9 +557,10 @@ class GifTab(QWidget):
 # ─────────────────────────────────────────────────────────────────────
 
 class ControlWindow(QWidget):
-    def __init__(self, driver: MatrixDriver):
+    def __init__(self, driver: MatrixDriver, settings: "Settings" = None):
         super().__init__()
-        self._driver = driver
+        self._driver   = driver
+        self._settings = settings or Settings()
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(_make_icon())
         self.setMinimumWidth(620)
@@ -495,7 +583,7 @@ class ControlWindow(QWidget):
         self._bc.con.valueChanged.connect(lambda v: driver.set_contrast(v / 100.0))
 
         # Tabs
-        self._gif_tab = GifTab(driver)
+        self._gif_tab = GifTab(driver, self._settings)
         tabs = QTabWidget()
         tabs.addTab(self._effects_tab(), "Effects")
         tabs.addTab(self._gif_tab,       "GIF / Image")
@@ -530,19 +618,49 @@ class ControlWindow(QWidget):
         update_btn.setFixedWidth(100)
         update_btn.clicked.connect(lambda: check_for_updates(self))
 
-        footer = QHBoxLayout()
-        footer.addWidget(self._close_to_tray)
-        footer.addSpacing(8)
-        footer.addWidget(self._startup)
-        footer.addSpacing(8)
-        footer.addWidget(version_label)
-        footer.addSpacing(6)
-        footer.addWidget(author_label)
-        footer.addSpacing(10)
-        footer.addWidget(self._debug_label)
-        footer.addStretch()
-        footer.addWidget(github_btn)
-        footer.addWidget(update_btn)
+        self._persist_cb = QCheckBox("Remember settings")
+        self._persist_cb.setChecked(self._settings.get_persist_enabled())
+        self._persist_cb.setStyleSheet("color:#666; font-size:10px;")
+        self._persist_cb.stateChanged.connect(
+            lambda v: self._settings.set_persist_enabled(bool(v))
+        )
+
+        clear_btn = QPushButton("Clear Saved")
+        clear_btn.setFixedHeight(20)
+        clear_btn.setFixedWidth(80)
+        clear_btn.setStyleSheet(
+            "QPushButton{font-size:10px;padding:1px 4px;color:#555;"
+            "background:#1a1a1a;border:1px solid #2a2a2a;border-radius:3px;}"
+            "QPushButton:hover{color:#f44;border-color:#f44;}"
+        )
+        clear_btn.clicked.connect(self._clear_settings)
+
+        # Footer line 1: checkboxes + clear
+        footer1 = QHBoxLayout()
+        footer1.addWidget(self._close_to_tray)
+        footer1.addSpacing(8)
+        footer1.addWidget(self._startup)
+        footer1.addSpacing(8)
+        footer1.addWidget(self._persist_cb)
+        footer1.addSpacing(6)
+        footer1.addWidget(clear_btn)
+        footer1.addStretch()
+
+        # Footer line 2: debug info + version + author + buttons (right-aligned)
+        footer2 = QHBoxLayout()
+        footer2.addWidget(self._debug_label)
+        footer2.addStretch()
+        footer2.addWidget(version_label)
+        footer2.addSpacing(6)
+        footer2.addWidget(author_label)
+        footer2.addSpacing(10)
+        footer2.addWidget(github_btn)
+        footer2.addWidget(update_btn)
+
+        footer = QVBoxLayout()
+        footer.setSpacing(3)
+        footer.addLayout(footer1)
+        footer.addLayout(footer2)
 
         # Root layout
         root = QVBoxLayout(self)
@@ -557,6 +675,7 @@ class ControlWindow(QWidget):
         root.addLayout(footer)
 
         driver.status_changed.connect(self._on_status)
+        self._restore()
 
     # ── tabs ─────────────────────────────────────────────────────────
 
@@ -665,7 +784,39 @@ class ControlWindow(QWidget):
         self._bc.con.valueChanged.connect(
             lambda v: qc.sync(self._bc.bri.value() / 100.0, v / 100.0))
 
+    def _restore(self):
+        if not self._settings.get_persist_enabled(): return
+        self._bc.bri.setValue(self._settings.get_brightness())
+        self._bc.con.setValue(self._settings.get_contrast())
+        self._gif_tab.restore(self._settings)
+        mode = self._settings.get_last_mode()
+        if mode.startswith("effect:"):
+            try: self._driver.set_mode_effect(mode[7:])
+            except Exception: pass
+        elif mode == "gif":
+            self._gif_tab.replay()
+        elif mode == "blank":
+            self._driver.set_mode_blank()
+
+    def _save(self):
+        if not self._settings.get_persist_enabled(): return
+        self._settings.set_brightness(self._bc.bri.value())
+        self._settings.set_contrast(self._bc.con.value())
+        self._gif_tab.save(self._settings)
+        mode   = self._driver.mode
+        effect = self._driver.current_effect_name()
+        if mode == "effect" and effect:
+            self._settings.set_last_mode(f"effect:{effect}")
+        else:
+            self._settings.set_last_mode(mode)
+        self._settings.save_all()
+
+    def _clear_settings(self):
+        self._settings.clear()
+        self._persist_cb.setChecked(False)
+
     def closeEvent(self, event):
+        self._save()
         if self._close_to_tray.isChecked():
             event.ignore(); self.hide()
         else:
@@ -798,43 +949,55 @@ QMenu::separator { height: 1px; background: #222; margin: 3px 0; }
 """
 
 
+
 # ─────────────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────────────
 
 def main():
-    app = QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
-    app.setWindowIcon(_make_icon())
-    app.setQuitOnLastWindowClosed(False)
+    import traceback
+    try:
+        app = QApplication(sys.argv)
+        app.setApplicationName(APP_NAME)
+        app.setWindowIcon(_make_icon())
+        app.setQuitOnLastWindowClosed(False)
 
-    if not QSystemTrayIcon.isSystemTrayAvailable():
-        print("System tray not available"); sys.exit(1)
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            print("System tray not available")
+            sys.exit(1)
 
-    driver  = MatrixDriver()
-    qc      = QuickControls(driver)
-    window  = ControlWindow(driver)
-    window.sync_quick_controls(qc)
-    tray    = TrayApp(driver, qc, window)
-    tray.show()
+        settings = Settings()
+        driver   = MatrixDriver()
+        qc       = QuickControls(driver)
+        window   = ControlWindow(driver, settings)
+        window.sync_quick_controls(qc)
+        tray = TrayApp(driver, qc, window)
+        tray.show()
 
-    _last = [time.perf_counter()]
-    timer = QTimer()
-    timer.setInterval(TICK_MS)
-    def _tick():
-        now = time.perf_counter(); dt = now - _last[0]; _last[0] = now
-        driver.tick(dt)
-        window.update_debug_info(dt)
-    timer.timeout.connect(_tick)
-    timer.start()
+        _last = [time.perf_counter()]
+        timer = QTimer()
+        timer.setInterval(TICK_MS)
 
-    driver.connect()
-    window.show()
+        def _tick():
+            now = time.perf_counter()
+            dt  = now - _last[0]
+            _last[0] = now
+            driver.tick(dt)
+            window.update_debug_info(dt)
 
-    # Silent update check 3s after launch
-    QTimer.singleShot(3000, lambda: check_for_updates(window, silent=True))
+        timer.timeout.connect(_tick)
+        timer.start()
 
-    sys.exit(app.exec())
+        driver.connect()
+        window.show()
+
+        QTimer.singleShot(3000, lambda: check_for_updates(window, silent=True))
+
+        sys.exit(app.exec())
+
+    except Exception:
+        traceback.print_exc()
+        input("Press Enter to close...")
 
 
 if __name__ == "__main__":
