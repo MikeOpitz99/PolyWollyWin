@@ -587,6 +587,263 @@ class AudioVisualizer(BaseEffect):
         return logical_to_physical(apply_mask(frame))   # note: calls directly (bypass _emit) to match original
 
 
+# ── Snake ─────────────────────────────────────────────────────────────
+# Auto-playing AI snake that navigates the LED matrix.
+# Uses a simple "follow the food, avoid walls and self" heuristic.
+
+class SnakeEffect(BaseEffect):
+    name = "Snake"
+
+    def __init__(self, speed=1.0):
+        self.speed  = speed   # moves per second multiplier
+        self._acc   = 0.0
+        self._reset_state()
+
+    def _reset_state(self):
+        mid_r = ROWS // 2
+        mid_c = COLS // 2
+        self._body  = [(mid_r, mid_c), (mid_r, mid_c - 1), (mid_r, mid_c - 2)]
+        self._dir   = (0, 1)   # (dr, dc)
+        self._food  = self._place_food()
+        self._dead  = False
+        self._dead_t = 0.0
+
+    def reset(self):
+        self._acc = 0.0
+        self._reset_state()
+
+    def _valid(self, r, c):
+        return 0 <= r < ROWS and 0 <= c < COLS and MASK_NP[r, c]
+
+    def _place_food(self):
+        body_set = set(self._body)
+        candidates = [(r, c) for r in range(ROWS) for c in range(COLS)
+                      if MASK_NP[r, c] and (r, c) not in body_set]
+        return random.choice(candidates) if candidates else (0, COLS - 1)
+
+    def _choose_dir(self):
+        hr, hc = self._body[0]
+        fr, fc = self._food
+        body_set = set(self._body)
+
+        # Try directions in order of preference: toward food first
+        dr_goal = 0 if fr == hr else (1 if fr > hr else -1)
+        dc_goal = 0 if fc == hc else (1 if fc > hc else -1)
+
+        candidates = []
+        if dr_goal != 0: candidates.append((dr_goal, 0))
+        if dc_goal != 0: candidates.append((0, dc_goal))
+        # add remaining cardinal directions as fallbacks
+        for d in [(0,1),(0,-1),(1,0),(-1,0)]:
+            if d not in candidates: candidates.append(d)
+
+        # Avoid reversing into ourselves
+        reverse = (-self._dir[0], -self._dir[1])
+
+        for d in candidates:
+            if d == reverse: continue
+            nr, nc = hr + d[0], hc + d[1]
+            if self._valid(nr, nc) and (nr, nc) not in body_set:
+                return d
+
+        # No safe move — pick anything that isn't instant self-collision
+        for d in [(0,1),(0,-1),(1,0),(-1,0)]:
+            if d == reverse: continue
+            nr, nc = hr + d[0], hc + d[1]
+            if self._valid(nr, nc):
+                return d
+
+        return self._dir  # give up, die gracefully
+
+    def tick(self, dt):
+        frame = np.zeros((ROWS, COLS), dtype=np.uint8)
+
+        if self._dead:
+            # Flash then restart
+            self._dead_t += dt
+            if self._dead_t > 1.5:
+                self._reset_state()
+            else:
+                # Blink body on/off
+                if int(self._dead_t * 6) % 2 == 0:
+                    for r, c in self._body:
+                        if MASK_NP[r, c]: frame[r, c] = 80
+            return self._emit(frame)
+
+        # Accumulate time; move when threshold crossed
+        moves_per_sec = 8 * self.speed
+        self._acc += dt
+        step = 1.0 / moves_per_sec
+
+        while self._acc >= step:
+            self._acc -= step
+            self._dir = self._choose_dir()
+            hr, hc = self._body[0]
+            nr, nc = hr + self._dir[0], hc + self._dir[1]
+
+            if not self._valid(nr, nc) or (nr, nc) in set(self._body[:-1]):
+                self._dead   = True
+                self._dead_t = 0.0
+                break
+
+            self._body.insert(0, (nr, nc))
+            if (nr, nc) == self._food:
+                self._food = self._place_food()   # ate food — don't shrink
+            else:
+                self._body.pop()                  # normal move — remove tail
+
+        # Draw food (bright)
+        fr, fc = self._food
+        if MASK_NP[fr, fc]: frame[fr, fc] = 255
+
+        # Draw body: head bright, tail dims
+        n = len(self._body)
+        for i, (r, c) in enumerate(self._body):
+            if MASK_NP[r, c]:
+                bri = 255 if i == 0 else max(40, int(200 * (1 - i / n)))
+                frame[r, c] = bri
+
+        return self._emit(frame)
+
+
+# ── Clock ─────────────────────────────────────────────────────────────
+# Displays current local time (HH:MM) in a minimal pixel font.
+# Each digit is 3×5, colon is 1×5, with 1-pixel gaps.
+
+class ClockEffect(BaseEffect):
+    name = "Clock"
+
+    # 3-wide × 5-tall pixel font for digits 0-9 and colon (:)
+    _FONT: dict[str, list[str]] = {
+        "0": ["111","101","101","101","111"],
+        "1": ["010","110","010","010","111"],
+        "2": ["111","001","111","100","111"],
+        "3": ["111","001","011","001","111"],
+        "4": ["101","101","111","001","001"],
+        "5": ["111","100","111","001","111"],
+        "6": ["111","100","111","101","111"],
+        "7": ["111","001","001","001","001"],
+        "8": ["111","101","111","101","111"],
+        "9": ["111","101","111","001","111"],
+        ":": ["0","1","0","1","0"],   # 1-wide
+    }
+
+    def __init__(self):
+        self._pulse = 0.0   # for colon blink
+
+    def reset(self): self._pulse = 0.0
+
+    def tick(self, dt):
+        import time as _time
+        self._pulse += dt
+        frame = np.zeros((ROWS, COLS), dtype=np.uint8)
+
+        now   = _time.localtime()
+        text  = f"{now.tm_hour:02d}:{now.tm_min:02d}"
+
+        # Measure total width
+        def char_w(ch): return 1 if ch == ":" else 3
+
+        total_w = sum(char_w(ch) for ch in text) + len(text) - 1  # chars + gaps
+        start_c = max(0, (COLS - total_w) // 2)
+        start_r = (ROWS - 5) // 2
+
+        col = start_c
+        for ch in text:
+            rows_data = self._FONT[ch]
+            w = char_w(ch)
+            bri = 255
+            if ch == ":":
+                bri = 255 if int(self._pulse * 2) % 2 == 0 else 60  # blink colon
+
+            for dr, row_str in enumerate(rows_data):
+                r = start_r + dr
+                if r < 0 or r >= ROWS: continue
+                for dc, px in enumerate(row_str):
+                    c = col + dc
+                    if c < 0 or c >= COLS: continue
+                    if px == "1" and MASK_NP[r, c]:
+                        frame[r, c] = bri
+            col += w + 1  # advance by char width + 1-pixel gap
+
+        return self._emit(frame)
+
+
+# ── Typing Visualizer ─────────────────────────────────────────────────
+# Lights up a column burst on each keypress, rippling outward.
+# Uses pynput for global key listening (optional — degrades gracefully).
+
+class TypingEffect(BaseEffect):
+    name = "Typing"
+
+    def __init__(self):
+        self._buf      = np.zeros((ROWS, COLS), dtype=np.float32)
+        self._listener = None
+        self._lock_t   = __import__("threading").Lock()
+        self._pending  = []   # list of column indices to burst
+        self._available = False
+        self._start()
+
+    def _start(self):
+        try:
+            from pynput import keyboard as _kb
+
+            def on_press(key):
+                # Map key to a column (spread across COLS)
+                try:
+                    ch = key.char
+                    if ch:
+                        idx = ord(ch.lower()) % COLS
+                    else:
+                        idx = random.randint(0, COLS - 1)
+                except AttributeError:
+                    idx = random.randint(0, COLS - 1)
+                with self._lock_t:
+                    self._pending.append(idx)
+
+            self._listener = _kb.Listener(on_press=on_press)
+            self._listener.start()
+            self._available = True
+        except Exception as e:
+            print(f"TypingEffect: pynput unavailable ({e}) — falling back to demo mode")
+
+    def reset(self):
+        self._buf[:] = 0
+        with self._lock_t: self._pending.clear()
+
+    def stop(self):
+        if self._listener:
+            try: self._listener.stop()
+            except: pass
+            self._listener = None
+
+    def tick(self, dt):
+        # In demo mode (no pynput), fire random bursts occasionally
+        if not self._available:
+            if random.random() < 3.0 * dt:
+                with self._lock_t:
+                    self._pending.append(random.randint(0, COLS - 1))
+
+        with self._lock_t:
+            bursts, self._pending = self._pending[:], []
+
+        for c in bursts:
+            # Vertical burst: full column bright
+            for r in range(ROWS):
+                if MASK_NP[r, c]:
+                    self._buf[r, c] = min(255.0, self._buf[r, c] + 255.0)
+            # Spread to neighbours
+            for nc in (c - 1, c + 1):
+                if 0 <= nc < COLS:
+                    for r in range(ROWS):
+                        if MASK_NP[r, nc]:
+                            self._buf[r, nc] = min(255.0, self._buf[r, nc] + 140.0)
+
+        # Decay
+        self._buf *= max(0.0, 1.0 - dt * 4.5)
+        return self._emit(np.clip(self._buf, 0, 255).astype(np.uint8))
+
+
 # ── Registry ─────────────────────────────────────────────────────────
 
 # Master list of all available effect classes
@@ -595,6 +852,7 @@ ALL_EFFECTS: list[type[BaseEffect]] = [
     WipeEffect, PlasmaEffect, NoiseEffect, ScanEffect,
     StarfieldEffect, CometEffect, RippleEffect,
     HelixEffect, FireworksEffect, BounceEffect, WaveEffect,
+    SnakeEffect, ClockEffect, TypingEffect,
     AudioVisualizer,
 ]
 

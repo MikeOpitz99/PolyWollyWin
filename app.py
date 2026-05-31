@@ -42,7 +42,7 @@ from renderer  import (
     blank_frame, logical_to_physical,
     ROWS, COLS, PHYSICAL_LED_COUNT,
 )
-from effects   import make_effect, EFFECT_NAMES, AudioVisualizer, BaseEffect
+from effects   import make_effect, EFFECT_NAMES, AudioVisualizer, TypingEffect, BaseEffect
 from paint     import PaintEditor
 from preview   import MatrixPreview
 
@@ -71,6 +71,7 @@ class Settings:
     def __init__(self):
         self._s = QSettings(self._ORG, self._APP)
 
+    def get_effect_speed(self)      -> float: return float(self._s.value("effect_speed", 1.0))
     def get_brightness(self)      -> int:  return int(self._s.value("brightness", 100))
     def get_contrast(self)        -> int:  return int(self._s.value("contrast", 100))
     def get_last_effect(self)     -> str:  return str(self._s.value("last_effect", ""))
@@ -82,6 +83,7 @@ class Settings:
     def get_persist_enabled(self) -> bool: return self._s.value("persist_enabled", "false").lower() == "true"
     def get_last_mode(self)       -> str:  return str(self._s.value("last_mode", ""))
 
+    def set_effect_speed(self, v: float):         self._s.setValue("effect_speed", v)
     def set_brightness(self, v: int):        self._s.setValue("brightness", v)
     def set_contrast(self, v: int):          self._s.setValue("contrast", v)
     def set_last_effect(self, v: str):       self._s.setValue("last_effect", v)
@@ -311,9 +313,13 @@ class MatrixDriver(QObject):
         self._effect: BaseEffect | None = None
         self._gif: GifPlayer | None     = None
         self._static: list[int]         = [0] * PHYSICAL_LED_COUNT
-        self._brightness = 1.0
-        self._contrast   = 1.0
-        self._gif_timer  = 0.0
+        self._brightness    = 1.0
+        self._contrast      = 1.0
+        self._gif_timer     = 0.0
+        self._effect_speed  = 1.0
+        self._gif_speed     = 1.0
+        self._effect2: BaseEffect | None = None   # second effect for blending
+        self._blend_alpha   = 0.0                 # 0.0 = 100% effect1, 1.0 = 100% effect2
 
     def connect(self) -> str | None:
         try:
@@ -331,6 +337,21 @@ class MatrixDriver(QObject):
     @property
     def connected(self): return self._transport.connected
 
+    def set_effect_speed(self, v: float):
+        with self._lock: self._effect_speed = max(0.1, min(5.0, v))
+
+    def set_gif_speed(self, v: float):
+        with self._lock: self._gif_speed = max(0.1, min(10.0, v))
+
+    def set_blend_effect(self, name: str | None):
+        with self._lock:
+            if isinstance(self._effect2, (AudioVisualizer, TypingEffect)):
+                self._effect2.stop()
+            self._effect2 = make_effect(name) if name else None
+
+    def set_blend_alpha(self, v: float):
+        with self._lock: self._blend_alpha = max(0.0, min(1.0, v))
+
     def set_brightness(self, v: float):
         with self._lock: self._brightness = max(0.0, min(1.0, v))
 
@@ -338,11 +359,11 @@ class MatrixDriver(QObject):
         with self._lock: self._contrast = max(0.1, min(3.0, v))
 
     def set_mode_blank(self):
-        with self._lock: self.mode = self.MODE_BLANK; self._effect = None
+        with self._lock: self.mode = self.MODE_BLANK; self._effect = None; self._effect2 = None
 
     def set_mode_effect(self, name: str):
         with self._lock:
-            if isinstance(self._effect, AudioVisualizer): self._effect.stop()
+            if isinstance(self._effect, (AudioVisualizer, TypingEffect)): self._effect.stop()
             self._effect = make_effect(name); self.mode = self.MODE_EFFECT
 
     def set_mode_gif(self, player: GifPlayer):
@@ -368,12 +389,18 @@ class MatrixDriver(QObject):
         if not self._transport.connected: return
         with self._lock:
             mode = self.mode; bri = self._brightness; con = self._contrast
+            eff_dt = dt * self._effect_speed
             if   mode == self.MODE_BLANK:  raw = [0] * PHYSICAL_LED_COUNT
-            elif mode == self.MODE_EFFECT and self._effect: raw = list(self._effect.tick(dt))
+            elif mode == self.MODE_EFFECT and self._effect:
+                raw = list(self._effect.tick(eff_dt))
+                if self._effect2 and self._blend_alpha > 0.0:
+                    raw2 = list(self._effect2.tick(eff_dt))
+                    a = self._blend_alpha
+                    raw = [int(v1 * (1 - a) + v2 * a) for v1, v2 in zip(raw, raw2)]
             elif mode == self.MODE_GIF and self._gif:
                 raw = list(self._gif.current_frame())
                 self._gif_timer += dt
-                if self._gif_timer >= self._gif.current_duration():
+                if self._gif_timer >= self._gif.current_duration() / self._gif_speed:
                     self._gif_timer = 0.0; self._gif.advance()
             elif mode in (self.MODE_IMAGE, self.MODE_PAINT): raw = list(self._static)
             else: raw = [0] * PHYSICAL_LED_COUNT
@@ -390,7 +417,8 @@ class MatrixDriver(QObject):
 
     def cleanup(self):
         with self._lock:
-            if isinstance(self._effect, AudioVisualizer): self._effect.stop()
+            if isinstance(self._effect,  (AudioVisualizer, TypingEffect)): self._effect.stop()
+            if isinstance(self._effect2, (AudioVisualizer, TypingEffect)): self._effect2.stop()
         try: self._transport.send_blank(); self._transport.disconnect()
         except Exception: pass
 
@@ -471,6 +499,26 @@ class GifTab(QWidget):
 
         layout.addWidget(self._file_label)
         layout.addLayout(file_row)
+
+        # ── GIF Playback Speed ────────────────────────────────────────
+        gif_speed_row = QHBoxLayout(); gif_speed_row.setSpacing(6)
+        gif_speed_row.addWidget(_label("⏩ Speed"))
+        self._gif_speed_sld = QSlider(Qt.Horizontal)
+        self._gif_speed_sld.setRange(10, 1000)   # 0.1× – 10.0×
+        self._gif_speed_sld.setValue(100)
+        gif_speed_val = QLabel("1.0×")
+        gif_speed_val.setFixedWidth(36)
+        gif_speed_val.setStyleSheet("color:#ccc; font-size:11px;")
+        self._gif_speed_sld.valueChanged.connect(
+            lambda v: (
+                gif_speed_val.setText(f"{v/100:.1f}×"),
+                self._driver.set_gif_speed(v / 100.0),
+            )
+        )
+        gif_speed_row.addWidget(self._gif_speed_sld)
+        gif_speed_row.addWidget(gif_speed_val)
+        layout.addLayout(gif_speed_row)
+        # ─────────────────────────────────────────────────────────────
         layout.addWidget(pos_group)
         layout.addWidget(preview_group)
         layout.addWidget(img_group)
@@ -684,16 +732,130 @@ class ControlWindow(QWidget):
         layout = QVBoxLayout(w)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
+
+        # ── Speed slider ──────────────────────────────────────────────
+        speed_row = QHBoxLayout()
+        speed_row.setSpacing(6)
+        speed_row.addWidget(_label("⚡ Speed"))
+        speed_sld = QSlider(Qt.Horizontal)
+        speed_sld.setRange(10, 500)   # 0.1× – 5.0×  (stored as int × 100)
+        speed_sld.setValue(100)       # 1.0× default
+        speed_val = QLabel("1.0×")
+        speed_val.setFixedWidth(36)
+        speed_val.setStyleSheet("color:#ccc; font-size:11px;")
+        speed_sld.valueChanged.connect(
+            lambda v: (
+                speed_val.setText(f"{v/100:.1f}×"),
+                self._driver.set_effect_speed(v / 100.0),
+            )
+        )
+        self._speed_sld = speed_sld   # persist reference for save/restore
+        speed_row.addWidget(speed_sld)
+        speed_row.addWidget(speed_val)
+        layout.addLayout(speed_row)
+
+        # ── Blend ─────────────────────────────────────────────────────
+        blend_group = QGroupBox("Blend  (mix primary effect with a second)")
+        bg = QVBoxLayout(blend_group); bg.setSpacing(4)
+
+        blend_btn_row = QHBoxLayout(); blend_btn_row.setSpacing(4)
+        blend_btn_row.addWidget(_label("Layer B", "#888"))
+        self._blend_label = QLabel("(none)")
+        self._blend_label.setStyleSheet("color:#e8001d; font-size:11px;")
+        blend_clear = QPushButton("✕ Clear")
+        blend_clear.setFixedHeight(22); blend_clear.setFixedWidth(60)
+        blend_clear.setStyleSheet(
+            "QPushButton{font-size:10px;padding:1px 4px;color:#555;"
+            "background:#1a1a1a;border:1px solid #2a2a2a;border-radius:3px;}"
+            "QPushButton:hover{color:#f44;border-color:#f44;}"
+        )
+        blend_clear.clicked.connect(self._blend_clear)
+        blend_btn_row.addWidget(self._blend_label)
+        blend_btn_row.addStretch()
+        blend_btn_row.addWidget(blend_clear)
+        bg.addLayout(blend_btn_row)
+
+        blend_sld_row = QHBoxLayout(); blend_sld_row.setSpacing(6)
+        blend_sld_row.addWidget(_label("Mix"))
+        self._blend_sld = QSlider(Qt.Horizontal)
+        self._blend_sld.setRange(0, 100); self._blend_sld.setValue(0)
+        self._blend_val = QLabel("A 100%")
+        self._blend_val.setFixedWidth(52)
+        self._blend_val.setStyleSheet("color:#ccc; font-size:11px;")
+        self._blend_sld.valueChanged.connect(self._on_blend_slider)
+        blend_sld_row.addWidget(self._blend_sld); blend_sld_row.addWidget(self._blend_val)
+        bg.addLayout(blend_sld_row)
+
+        layout.addWidget(blend_group)
+        layout.addWidget(_sep())
+        # ─────────────────────────────────────────────────────────────
+
+        # ── Effect buttons (3-col grid) with Layer B checkboxes ───────
+        self._blend_checks: dict[str, QCheckBox] = {}
+
+        btn_grid = QGridLayout(); btn_grid.setSpacing(6)
+        COLS_UI = 3
+
+        # Blank button spans all 3 button columns (cols 0,2,4 in the interleaved layout)
         blank_btn = QPushButton("⬛  Blank")
         blank_btn.clicked.connect(self._driver.set_mode_blank)
-        btns = [blank_btn]
-        for name in EFFECT_NAMES:
+        blank_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        blank_btn.setMinimumHeight(30)
+        btn_grid.addWidget(blank_btn, 0, 0, 1, COLS_UI * 2 - 1)
+
+        for i, name in enumerate(EFFECT_NAMES):
+            row  = (i // COLS_UI) + 1        # grid row (row 0 = blank)
+            col  = (i % COLS_UI) * 2         # button occupies even columns
+            ccol = col + 1                   # checkbox in the odd column to the right
+
             b = QPushButton(f"▶  {name}"); _n = name
+            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            b.setMinimumHeight(30)
             b.clicked.connect(lambda _, n=_n: self._driver.set_mode_effect(n))
-            btns.append(b)
-        layout.addLayout(_uniform_grid(btns, cols=3))
+            btn_grid.addWidget(b, row, col)
+
+            cb = QCheckBox(); _n2 = name
+            cb.setToolTip(f"Set {name} as Blend Layer B")
+            cb.setFixedWidth(18)
+            cb.stateChanged.connect(lambda state, n=_n2: self._on_blend_check(n, state))
+            self._blend_checks[name] = cb
+            btn_grid.addWidget(cb, row, ccol, alignment=Qt.AlignLeft | Qt.AlignVCenter)
+
+        # Even columns (buttons) expand equally; odd columns (checkboxes) stay narrow
+        for c in range(COLS_UI):
+            btn_grid.setColumnStretch(c * 2, 1)
+            btn_grid.setColumnStretch(c * 2 + 1, 0)
+
+        layout.addLayout(btn_grid)
         layout.addStretch()
         return w
+
+    def _on_blend_check(self, name: str, state: int):
+        if state:
+            # Uncheck all other boxes first (only one Layer B at a time)
+            for n, cb in self._blend_checks.items():
+                if n != name:
+                    cb.blockSignals(True); cb.setChecked(False); cb.blockSignals(False)
+            self._set_blend_effect(name)
+        else:
+            self._blend_clear()
+
+    def _on_blend_slider(self, v: int):
+        self._blend_val.setText(f"A {100-v}%" if v < 100 else "B 100%")
+        self._driver.set_blend_alpha(v / 100.0)
+
+    def _set_blend_effect(self, name: str):
+        self._blend_label.setText(name)
+        self._blend_label.setStyleSheet("color:#e8001d; font-size:11px;")
+        self._driver.set_blend_effect(name)
+
+    def _blend_clear(self):
+        self._blend_label.setText("(none)")
+        self._blend_label.setStyleSheet("color:#555; font-size:11px;")
+        self._blend_sld.setValue(0)
+        self._driver.set_blend_effect(None)
+        for cb in self._blend_checks.values():
+            cb.blockSignals(True); cb.setChecked(False); cb.blockSignals(False)
 
     def _paint_tab(self) -> QWidget:
         w = QWidget()
@@ -788,6 +950,7 @@ class ControlWindow(QWidget):
         if not self._settings.get_persist_enabled(): return
         self._bc.bri.setValue(self._settings.get_brightness())
         self._bc.con.setValue(self._settings.get_contrast())
+        self._speed_sld.setValue(int(self._settings.get_effect_speed() * 100))
         self._gif_tab.restore(self._settings)
         mode = self._settings.get_last_mode()
         if mode.startswith("effect:"):
@@ -802,6 +965,7 @@ class ControlWindow(QWidget):
         if not self._settings.get_persist_enabled(): return
         self._settings.set_brightness(self._bc.bri.value())
         self._settings.set_contrast(self._bc.con.value())
+        self._settings.set_effect_speed(self._speed_sld.value() / 100.0)
         self._gif_tab.save(self._settings)
         mode   = self._driver.mode
         effect = self._driver.current_effect_name()
