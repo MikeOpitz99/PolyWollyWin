@@ -72,8 +72,6 @@ class Settings:
         self._s = QSettings(self._ORG, self._APP)
 
     def get_effect_speed(self)      -> float: return float(self._s.value("effect_speed", 1.0))
-    def get_blend_effect(self)      -> str:   return str(self._s.value("blend_effect", ""))
-    def get_blend_alpha(self)       -> int:   return int(self._s.value("blend_alpha", 0))
     def get_brightness(self)      -> int:  return int(self._s.value("brightness", 100))
     def get_contrast(self)        -> int:  return int(self._s.value("contrast", 100))
     def get_last_effect(self)     -> str:  return str(self._s.value("last_effect", ""))
@@ -86,8 +84,6 @@ class Settings:
     def get_last_mode(self)       -> str:  return str(self._s.value("last_mode", ""))
 
     def set_effect_speed(self, v: float):         self._s.setValue("effect_speed", v)
-    def set_blend_effect(self, v: str):           self._s.setValue("blend_effect", v)
-    def set_blend_alpha(self, v: int):            self._s.setValue("blend_alpha", v)
     def set_brightness(self, v: int):        self._s.setValue("brightness", v)
     def set_contrast(self, v: int):          self._s.setValue("contrast", v)
     def set_last_effect(self, v: str):       self._s.setValue("last_effect", v)
@@ -955,10 +951,6 @@ class ControlWindow(QWidget):
         self._bc.bri.setValue(self._settings.get_brightness())
         self._bc.con.setValue(self._settings.get_contrast())
         self._speed_sld.setValue(int(self._settings.get_effect_speed() * 100))
-        blend_name = self._settings.get_blend_effect()
-        if blend_name and blend_name in self._blend_checks:
-            self._blend_checks[blend_name].setChecked(True)   # triggers _on_blend_check
-            self._blend_sld.setValue(self._settings.get_blend_alpha())
         self._gif_tab.restore(self._settings)
         mode = self._settings.get_last_mode()
         if mode.startswith("effect:"):
@@ -974,8 +966,6 @@ class ControlWindow(QWidget):
         self._settings.set_brightness(self._bc.bri.value())
         self._settings.set_contrast(self._bc.con.value())
         self._settings.set_effect_speed(self._speed_sld.value() / 100.0)
-        self._settings.set_blend_effect(self._blend_label.text() if self._blend_label.text() != "(none)" else "")
-        self._settings.set_blend_alpha(self._blend_sld.value())
         self._gif_tab.save(self._settings)
         mode   = self._driver.mode
         effect = self._driver.current_effect_name()
