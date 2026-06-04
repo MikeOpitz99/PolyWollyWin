@@ -92,3 +92,6 @@ Initial public release — direct HID control of the ROG Strix Flare II Animate 
  
 ## v2.1.2 
 - fixing the save for layer b - oof. 
+ 
+## v2.1.21 
+- releasing some updates for future changes 
