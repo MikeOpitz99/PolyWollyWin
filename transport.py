@@ -1,6 +1,6 @@
 """
 transport.py — ROG Strix Flare II Animate HID transport
-Protocol confirmed from live USBPcap capture (pickledick.pcap).
+Protocol confirmed from live USBPcap capture (USBPcap.pcap).
 
 Wire format (1024-byte payload, hidapi prepends 0x00 report-ID):
   [0x60, 0x81, 0x00, 0x00, <312 LED bytes>, <zero padding to 1024>]
