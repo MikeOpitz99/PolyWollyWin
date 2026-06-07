@@ -129,3 +129,6 @@ v1.0.0
 - Initial public release — direct HID control of the ROG Strix Flare II Animate matrix display. Basic effects: Pulse, Rain, Wipe, Plasma, Noise, Scan. GIF and static image playback. No Armoury Crate required. 
 ## v2.5.0 
 - Major updates 
+ 
+## v2.5.0 
+- Huge updates 

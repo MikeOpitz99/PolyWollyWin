@@ -1,5 +1,5 @@
 #define MyAppName "PolyWollyWin"
-#define MyAppVersion 2.5.0
+#define MyAppVersion "2.5.0"
 #define MyAppPublisher "Mike Opitz"
 #define MyAppURL "https://github.com/MikeOpitz99/PolyWollyWin"
 #define MyAppExeName "PolyWollyWin.exe"
@@ -40,6 +40,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "{#DistDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRoot}\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "{#SourceRoot}\CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
