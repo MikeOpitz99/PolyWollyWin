@@ -1,3 +1,6 @@
+## v2.6.5
+- updating some effects
+
 ## v2.6.3 - 2026-06-08
 
 ### Added

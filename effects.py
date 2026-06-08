@@ -342,12 +342,15 @@ class WipeEffect(BaseEffect):
         "width":     {"label": "Width",     "min": 1,  "max": 20,  "default": 5,   "scale": 1.0},
         "direction": {"label": "Direction", "min": 0,  "max": 3,   "default": 1,   "scale": 1.0,
                       "display": {0: "\u2190", 1: "\u2192", 2: "\u2191", 3: "\u2193"}},
+        "bounce":    {"label": "Bounce",    "min": 0,  "max": 1,   "default": 0,   "scale": 1.0,
+                      "display": {0: "Wrap", 1: "Bounce"}},
     }
 
-    def __init__(self, speed: float = 1.0, width: int = 5, direction: int = 1):
+    def __init__(self, speed: float = 1.0, width: int = 5, direction: int = 1, bounce: int = 0):
         self.speed     = speed
         self.width     = width
         self.direction = direction
+        self.bounce    = bounce
         self._t        = 0.0
 
     def reset(self):
@@ -355,12 +358,17 @@ class WipeEffect(BaseEffect):
 
     def tick(self, dt: float) -> list[int]:
         self._t += dt * self.speed
-        d = int(self.direction) % 4
+        d     = int(self.direction) % 4
         frame = np.zeros((ROWS, COLS), dtype=np.uint8)
 
         if d in (0, 1):
             length = COLS
-            pos = (self._t * 0.5 * length) % (length * 2)
+            raw    = self._t * 0.5 * length
+            if int(self.bounce):
+                t_mod = raw % (2 * length)
+                pos   = t_mod if t_mod <= length else 2 * length - t_mod
+            else:
+                pos = raw % (length * 2)
             if d == 0:
                 pos = (length * 2) - pos
             for c in range(COLS):
@@ -369,7 +377,12 @@ class WipeEffect(BaseEffect):
                     frame[:, c] = int(255 * (1 - dist / max(1, self.width)))
         else:
             length = ROWS
-            pos = (self._t * 0.5 * length) % (length * 2)
+            raw    = self._t * 0.5 * length
+            if int(self.bounce):
+                t_mod = raw % (2 * length)
+                pos   = t_mod if t_mod <= length else 2 * length - t_mod
+            else:
+                pos = raw % (length * 2)
             if d == 2:
                 pos = (length * 2) - pos
             for r in range(ROWS):
@@ -449,23 +462,36 @@ class ScanEffect(BaseEffect):
         "speed":     {"label": "Speed",     "min": 10, "max": 500, "default": 100, "scale": 100.0},
         "direction": {"label": "Direction", "min": 0,  "max": 3,   "default": 1,   "scale": 1.0,
                       "display": {0: "\u2190", 1: "\u2192", 2: "\u2191", 3: "\u2193"}},
+        "bounce":    {"label": "Bounce",    "min": 0,  "max": 1,   "default": 0,   "scale": 1.0,
+                      "display": {0: "Wrap", 1: "Bounce"}},
     }
 
-    def __init__(self, speed: float = 1.0, direction: int = 1):
+    def __init__(self, speed: float = 1.0, direction: int = 1, bounce: int = 0):
         self.speed     = speed
         self.direction = direction
+        self.bounce    = bounce
         self._t        = 0.0
 
     def reset(self):
         self._t = 0.0
 
+    @staticmethod
+    def _tri(t: float, length: int) -> int:
+        """Triangle wave: 0 → length-1 → 0 → …"""
+        m = length - 1
+        if m <= 0:
+            return 0
+        t_mod = t % (2 * m)
+        return int(t_mod) if t_mod <= m else int(2 * m - t_mod)
+
     def tick(self, dt: float) -> list[int]:
         self._t += dt * self.speed
-        d = int(self.direction) % 4
+        d     = int(self.direction) % 4
         frame = np.zeros((ROWS, COLS), dtype=np.uint8)
 
         if d in (0, 1):
-            col = int(self._t * 10) % COLS
+            raw = self._t * 10
+            col = self._tri(raw, COLS) if int(self.bounce) else int(raw) % COLS
             if d == 0:
                 col = COLS - 1 - col
             for dc, bri in ((0, 255), (-1, 120), (1, 120)):
@@ -473,7 +499,8 @@ class ScanEffect(BaseEffect):
                 if 0 <= c < COLS:
                     frame[:, c] = bri
         else:
-            row = int(self._t * 6) % ROWS
+            raw = self._t * 6
+            row = self._tri(raw, ROWS) if int(self.bounce) else int(raw) % ROWS
             if d == 2:
                 row = ROWS - 1 - row
             for dr, bri in ((0, 255), (-1, 120), (1, 120)):
@@ -951,46 +978,95 @@ class SnakeEffect(BaseEffect):
 # Clock (3×5 pixel font)
 # ─────────────────────────────────────────────────────────────────────
 
-_DIGITS = {
-    "0": [0b111, 0b101, 0b101, 0b101, 0b111],
-    "1": [0b010, 0b110, 0b010, 0b010, 0b111],
-    "2": [0b111, 0b001, 0b111, 0b100, 0b111],
-    "3": [0b111, 0b001, 0b111, 0b001, 0b111],
-    "4": [0b101, 0b101, 0b111, 0b001, 0b001],
-    "5": [0b111, 0b100, 0b111, 0b001, 0b111],
-    "6": [0b111, 0b100, 0b111, 0b101, 0b111],
-    "7": [0b111, 0b001, 0b001, 0b001, 0b001],
-    "8": [0b111, 0b101, 0b111, 0b101, 0b111],
-    "9": [0b111, 0b101, 0b111, 0b001, 0b111],
-    ":": [0b000, 0b010, 0b000, 0b010, 0b000],
+# 4-wide × 7-tall pixel font.  Bit 3 = leftmost column of the glyph.
+_CLOCK_FONT = {
+    "0": [0b0110, 0b1001, 0b1001, 0b1001, 0b1001, 0b1001, 0b0110],
+    "1": [0b0100, 0b1100, 0b0100, 0b0100, 0b0100, 0b0100, 0b1110],
+    "2": [0b0110, 0b1001, 0b0001, 0b0010, 0b0100, 0b1000, 0b1111],
+    "3": [0b0111, 0b0001, 0b0001, 0b0111, 0b0001, 0b0001, 0b0111],
+    "4": [0b1001, 0b1001, 0b1001, 0b1111, 0b0001, 0b0001, 0b0001],
+    "5": [0b1111, 0b1000, 0b1000, 0b1110, 0b0001, 0b0001, 0b1111],
+    "6": [0b0110, 0b1000, 0b1000, 0b1110, 0b1001, 0b1001, 0b0110],
+    "7": [0b1111, 0b0001, 0b0001, 0b0010, 0b0010, 0b0100, 0b0100],
+    "8": [0b0110, 0b1001, 0b1001, 0b0110, 0b1001, 0b1001, 0b0110],
+    "9": [0b0110, 0b1001, 0b1001, 0b0111, 0b0001, 0b1001, 0b0110],
 }
+# 2-wide colon glyph (bit 1 = left dot column)
+_CLOCK_COLON = [0b00, 0b00, 0b10, 0b00, 0b10, 0b00, 0b00]
+
 
 class ClockEffect(BaseEffect):
+    """
+    HH:MM clock with a 4×7 pixel font.
+
+    The diagonal LED mask means the left edge of the display is cut off on
+    lower rows.  Default x_offset=0 positions the clock so all pixels at
+    rows 1-7 are valid on the ROG Strix Flare II Animate.  Move X to taste.
+
+    Layout at default:
+      x_start = 14  →  rightmost pixel at col 35  (within COLS=37)
+      row_start = 1  →  font occupies rows 1-7  (bottom row needs col ≥14 ✓)
+    """
     name = "Clock"
     PARAMS = {
-        "x_offset": {"label": "Move X", "min": -18, "max": 18, "default": 0, "scale": 1.0},
+        "hour_24":  {"label": "Format",  "min": 0, "max": 1,   "default": 1, "scale": 1.0,
+                     "display": {0: "12h", 1: "24h"}},
+        "blink":    {"label": "Blink :", "min": 0, "max": 1,   "default": 1, "scale": 1.0,
+                     "display": {0: "Off", 1: "On"}},
+        "x_offset": {"label": "Move X",  "min": -14, "max": 20, "default": 0, "scale": 1.0},
     }
 
-    def __init__(self, x_offset: int = 0):
+    _CHAR_W   = 4
+    _COLON_W  = 2
+    _GAP      = 1
+    _H        = 7
+    _X_BASE   = 14   # ensures row 7 (needs col≥14) is fully unmasked at default
+
+    def __init__(self, hour_24: int = 1, blink: int = 1, x_offset: int = 0):
+        self.hour_24  = hour_24
+        self.blink    = blink
         self.x_offset = x_offset
+        self._t       = 0.0
+
+    def reset(self):
+        self._t = 0.0
 
     def tick(self, dt: float) -> list[int]:
-        t   = time.localtime()
-        txt = f"{t.tm_hour:02d}:{t.tm_min:02d}:{t.tm_sec:02d}"
-        frame = np.zeros((ROWS, COLS), dtype=np.uint8)
-        x = 1 + int(self.x_offset)
-        for ch in txt:
-            glyph = _DIGITS.get(ch)
-            if glyph is None:
-                x += 4; continue
-            for row_i, bits in enumerate(glyph):
-                r = row_i + (ROWS // 2 - 3)
-                if 0 <= r < ROWS:
-                    for bit_i in range(3):
-                        c = x + (2 - bit_i)
-                        if 0 <= c < COLS and (bits >> bit_i) & 1:
-                            frame[r, c] = 255
-            x += 4
+        self._t += dt
+        colon_lit = (not int(self.blink)) or (int(self._t * 2) % 2 == 0)
+
+        now = time.localtime()
+        if int(self.hour_24):
+            h = now.tm_hour
+        else:
+            h = now.tm_hour % 12 or 12
+
+        h_str = f"{h:02d}"
+        m_str = f"{now.tm_min:02d}"
+
+        x_start   = self._X_BASE + int(self.x_offset)
+        row_start = (ROWS - self._H) // 2 - 1   # rows 1-7 on a 12-row display
+        row_start = max(0, row_start)
+        frame     = np.zeros((ROWS, COLS), dtype=np.uint8)
+
+        def _draw_char(glyph: list[int], x: int, width: int):
+            for ri, bits in enumerate(glyph):
+                r = row_start + ri
+                if not (0 <= r < ROWS):
+                    continue
+                for bi in range(width):
+                    c = x + bi
+                    if 0 <= c < COLS and (bits >> (width - 1 - bi)) & 1:
+                        frame[r, c] = 255
+            return x + width + self._GAP
+
+        x = x_start
+        x = _draw_char(_CLOCK_FONT[h_str[0]], x, self._CHAR_W)
+        x = _draw_char(_CLOCK_FONT[h_str[1]], x, self._CHAR_W)
+        x = _draw_char(_CLOCK_COLON if colon_lit else [0]*self._H, x, self._COLON_W)
+        x = _draw_char(_CLOCK_FONT[m_str[0]], x, self._CHAR_W)
+        x = _draw_char(_CLOCK_FONT[m_str[1]], x, self._CHAR_W)
+
         return self._emit(frame)
 
 
@@ -1642,6 +1718,145 @@ class LightningEffect(BaseEffect):
         return self._emit(np.clip(self._buf, 0, 255).astype(np.uint8))
 
 # ═════════════════════════════════════════════════════════════════════
+# Chase  (KITT / Larson scanner)
+# ═════════════════════════════════════════════════════════════════════
+
+class ChaseEffect(BaseEffect):
+    """
+    Knight Rider-style Larson scanner: a bright glow bounces left-right
+    across the matrix with a soft trailing tail.
+
+    Width   — half-width of the glow envelope in columns.
+    Rows    — how many rows the beam occupies (centred vertically).
+    """
+    name = "Chase"
+    PARAMS = {
+        "speed": {"label": "Speed", "min": 10, "max": 500, "default": 100, "scale": 100.0},
+        "width": {"label": "Width", "min": 2,  "max": 15,  "default": 5,   "scale": 1.0},
+        "rows":  {"label": "Rows",  "min": 1,  "max": 12,  "default": 4,   "scale": 1.0},
+    }
+
+    def __init__(self, speed: float = 1.0, width: int = 5, rows: int = 4):
+        self.speed = speed
+        self.width = width
+        self.rows  = rows
+        self._pos  = 0.0
+        self._dir  = 1.0
+        self._buf  = np.zeros((ROWS, COLS), dtype=np.float32)
+
+    def reset(self):
+        self._buf[:] = 0.0
+        self._pos = 0.0
+        self._dir = 1.0
+
+    def tick(self, dt: float) -> list[int]:
+        eff_dt = dt * self.speed
+        rate   = 20.0   # columns per second at speed=1.0
+
+        self._pos += self._dir * rate * eff_dt
+        if self._pos >= COLS - 1:
+            self._pos = float(COLS - 1)
+            self._dir = -1.0
+        elif self._pos <= 0:
+            self._pos = 0.0
+            self._dir = 1.0
+
+        self._buf *= 0.82   # trail decay
+
+        n  = max(1, int(self.rows))
+        mid = ROWS // 2
+        r0  = max(0, mid - n // 2)
+        r1  = min(ROWS, r0 + n)
+        w   = max(1.0, float(self.width))
+
+        for c in range(COLS):
+            dist = abs(c - self._pos)
+            if dist < w * 2.5:
+                bri = 255.0 * max(0.0, 1.0 - (dist / w) ** 1.5)
+                for r in range(r0, r1):
+                    self._buf[r, c] = max(self._buf[r, c], bri)
+
+        return self._emit(np.clip(self._buf, 0, 255).astype(np.uint8))
+
+
+# ═════════════════════════════════════════════════════════════════════
+# KITT Audio  (scanner speed & brightness driven by audio level)
+# ═════════════════════════════════════════════════════════════════════
+
+class KITTAudioEffect(AudioVisualizer):
+    """
+    Audio-reactive Knight Rider scanner.
+
+    Inherits the WASAPI loopback / mic capture from AudioVisualizer.
+    The scanner always bounces; audio level drives its speed (quiet = slow
+    idle sweep, loud = fast frantic bounce) and peak brightness.
+    Falls back to a gentle idle sweep when no audio is detected.
+    """
+    name = "KITT Audio"
+    PARAMS = {
+        "sensitivity": {"label": "Sensitivity", "min": 100, "max": 3000, "default": 900,  "scale": 100.0},
+        "boost":       {"label": "Boost",       "min": 100, "max": 5000, "default": 1800, "scale": 100.0},
+        "width":       {"label": "Width",       "min": 2,   "max": 15,   "default": 6,    "scale": 1.0},
+        "rows":        {"label": "Rows",        "min": 1,   "max": 6,    "default": 4,    "scale": 1.0},
+    }
+
+    def __init__(self, sensitivity: float = 9.0, boost: float = 18.0,
+                 width: int = 6, rows: int = 4,
+                 falloff: float = 0.80, floor: float = 0.0008):
+        super().__init__(sensitivity=sensitivity, boost=boost,
+                         falloff=falloff, floor=floor)
+        self.width       = width
+        self.rows        = rows
+        self._scan_pos   = 0.0
+        self._scan_dir   = 1.0
+        self._scan_buf   = np.zeros((ROWS, COLS), dtype=np.float32)
+
+    def _audio_level(self) -> float:
+        """Return 0-1 RMS level from the shared audio buffer."""
+        with self._lock:
+            raw = None if self._buf is None else self._buf.copy()
+        if raw is None or len(raw) < 8:
+            return 0.0
+        raw = np.nan_to_num(raw.astype(np.float32))
+        raw -= float(np.mean(raw))
+        rms = float(np.sqrt(np.mean(raw * raw)))
+        return float(np.clip(rms * float(self.sensitivity) * 3.0, 0.0, 1.0))
+
+    def tick(self, dt: float) -> list[int]:
+        level = self._audio_level()
+
+        # Speed: quiet → 5 cols/s idle sweep; loud → 45 cols/s frantic
+        speed = 5.0 + level * 40.0
+        self._scan_pos += self._scan_dir * speed * dt
+        if self._scan_pos >= COLS - 1:
+            self._scan_pos = float(COLS - 1)
+            self._scan_dir = -1.0
+        elif self._scan_pos <= 0:
+            self._scan_pos = 0.0
+            self._scan_dir = 1.0
+
+        # Brightness: minimum 8% idle glow, full 100% at peak volume
+        bri_scale = 0.08 + level * 0.92
+
+        self._scan_buf *= 0.78
+
+        n   = max(1, int(self.rows))
+        mid = ROWS // 2
+        r0  = max(0, mid - n // 2)
+        r1  = min(ROWS, r0 + n)
+        w   = max(1.0, float(self.width))
+
+        for c in range(COLS):
+            dist = abs(c - self._scan_pos)
+            if dist < w * 2.5:
+                bri = 255.0 * bri_scale * max(0.0, 1.0 - (dist / w) ** 1.5)
+                for r in range(r0, r1):
+                    self._scan_buf[r, c] = max(self._scan_buf[r, c], bri)
+
+        return self._emit(np.clip(self._scan_buf, 0, 255).astype(np.uint8))
+
+
+# ═════════════════════════════════════════════════════════════════════
 # Registry
 # ═════════════════════════════════════════════════════════════════════
 # Comment out any effects here that you would like to hide from the main select list
@@ -1649,10 +1864,10 @@ class LightningEffect(BaseEffect):
 
 ALL_EFFECTS: list[type[BaseEffect]] = [
 #    PulseEffect,
-    MatrixRainEffect,
+#    MatrixRainEffect,
     MatrixRainEffectV2, 
     RainEffect,
-    WipeEffect,
+#    WipeEffect,
     PlasmaEffect,
 #    NoiseEffect,
     ScanEffect,
@@ -1671,10 +1886,11 @@ ALL_EFFECTS: list[type[BaseEffect]] = [
     FireEffect,
     MetaballsEffect,
 #    GameOfLifeEffect,
+    ChaseEffect,
+#   KITTAudioEffect,  # enable in Audio tab or uncomment to show in Effects list
 ]
 
 EFFECT_NAMES: list[str] = [e.name for e in ALL_EFFECTS]
-
 
 def make_effect(name: str) -> BaseEffect:
     for cls in ALL_EFFECTS:
