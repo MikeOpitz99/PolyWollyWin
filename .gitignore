@@ -1,55 +1,65 @@
-# Python
-
-**pycache**/
+# Python cache
+__pycache__/
+**/__pycache__/
 *.py[cod]
-*.pyo
+*$py.class
 *.pyd
+*.pyo
+
+# Python packaging
 .Python
-
-# Packaging
-
+.eggs/
 *.egg
 *.egg-info/
-.eggs/
 
 # Virtual environments
-
-venv/
 .venv/
+venv/
 env/
+ENV/
 
-# PyInstaller
-
+# Build artifacts
 build/
 dist/
-*.spec
-
-# Release artifacts
-
-releases/
 builds/
-*.zip
+*.manifest
+*.pyz
 
-# IDEs
+# Release artifacts generated locally
+releases/*.exe
+releases/*.zip
+releases/*.7z
+releases/*.msi
 
+# Logs and temp
+*.log
+*.tmp
+*.pid
+temp/
+tmp/
+
+# IDE/editor noise
 .vscode/
 .idea/
+*.suo
+*.user
 *.swp
 *.swo
 
-# OS
-
-.DS_Store
-Thumbs.db
+# Windows noise
+desktop.ini
 Desktop.ini
+Thumbs.db
 
-# Runtime / logs
-
-*.log
+# Packet/device captures
 *.pcap
 *.pcapng
 
-# Temp
+# Private scripts, protected in case they are accidentally copied into the repo
+ReleasePolyWollyWin.bat
+build_exe.bat
+*_PRIVATE.bat
 
-temp/
-tmp/
+# IMPORTANT:
+# PolyWollyWin.spec and PolyWollyWin.iss are intentionally NOT ignored.
+# They belong in the public repo.

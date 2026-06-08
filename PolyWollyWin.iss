@@ -12,22 +12,29 @@ AppId={{B9F2A3C1-4D7E-4F8A-9B2C-1E3D5F7A9B0C}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+AppCopyright=Copyright (C) 2024 Mike Opitz
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}/releases
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+MinVersion=10.0.17763
+CloseApplications=yes
+CloseApplicationsFilter=PolyWollyWin.exe
+RestartApplications=no
 OutputDir={#ReleaseDir}
 OutputBaseFilename=PolyWollyWin-v{#MyAppVersion}-Setup
 SetupIconFile={#SourceRoot}\assets\pww.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 PrivilegesRequired=lowest
+
+
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -60,7 +67,11 @@ Filename: "{app}\{#MyAppExeName}"; \
 [UninstallRun]
 Filename: "taskkill"; \
     Parameters: "/f /im {#MyAppExeName}"; \
-    Flags: runhidden
+    Flags: runhidden; RunOnceId: "KillPolyWollyWin"
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{app}"
+Type: files; Name: "{app}\PolyWollyWin.exe"
+Type: files; Name: "{app}\README.md"
+Type: files; Name: "{app}\CHANGELOG.md"
+Type: files; Name: "{app}\LICENSE"
+Type: dirifempty; Name: "{app}"

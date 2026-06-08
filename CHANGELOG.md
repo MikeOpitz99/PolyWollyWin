@@ -1,3 +1,6 @@
+## v2.6.0
+- 
+
 v2.5.0
 New Effects
 
@@ -132,3 +135,15 @@ v1.0.0
  
 ## v2.5.0 
 - Huge updates 
+ 
+## v2.5.1 
+- fixing release version 
+ 
+## v2.5.5 
+-  
+ 
+## v2.5.5 
+-  
+ 
+## v2.5.2 
+-  
