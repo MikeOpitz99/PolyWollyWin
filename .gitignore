@@ -25,12 +25,6 @@ builds/
 *.manifest
 *.pyz
 
-# Release artifacts generated locally
-releases/*.exe
-releases/*.zip
-releases/*.7z
-releases/*.msi
-
 # Logs and temp
 *.log
 *.tmp

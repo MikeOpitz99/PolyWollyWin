@@ -1,5 +1,5 @@
 #define MyAppName "PolyWollyWin"
-#define MyAppVersion "2.5.0"
+#define MyAppVersion "2.6.3"
 #define MyAppPublisher "Mike Opitz"
 #define MyAppURL "https://github.com/MikeOpitz99/PolyWollyWin"
 #define MyAppExeName "PolyWollyWin.exe"

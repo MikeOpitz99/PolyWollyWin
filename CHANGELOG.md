@@ -1,3 +1,6 @@
+## v2.6.3
+- repo clean up and installer fixes
+
 ## v2.6.0
 - 
 
