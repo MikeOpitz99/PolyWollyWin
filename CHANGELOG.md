@@ -1,8 +1,25 @@
-## v2.6.3
-- repo clean up and installer fixes
+## v2.6.3 - 2026-06-08
 
-## v2.6.0
-- 
+### Added
+- Added a one-click release workflow for building PolyWollyWin release artifacts from a single version prompt.
+- Added automated ZIP packaging for portable releases.
+- Added automated Inno Setup installer generation for `PolyWollyWin-vX.X.X-Setup.exe`.
+- Added release-output validation so the build stops when the expected installer file is not created.
+- Added release artifact cleanup rules to separate public release assets from local build outputs.
+- Added repository hygiene rules for keeping generated build folders out of source control.
+- Added release ZIP auditing support to check archive contents before pushing artifacts to GitHub.
+
+### Changed
+- Updated installer script settings to use the newer architecture identifier instead of the deprecated `x64` value.
+- Updated uninstall handling so the taskkill uninstall step includes a `RunOnceId`.
+
+### Fixed
+- Fixed installer version drift where `version.py` could update but `PolyWollyWin.iss` stayed on an older version.
+- Fixed release builds producing an installer with the wrong filename, such as creating a `v2.5.0` installer when the requested release was `v2.6.0`.
+- Replaced fragile PowerShell regex version replacement with safer line-based installer version updating.
+- Fixed accidental hiding of public build configuration by ensuring `.spec` and `.iss` files are not ignored.
+- Cleaned up release-version handling after several failed installer attempts and malformed artifact names.
+
 
 v2.5.0
 New Effects
