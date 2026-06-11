@@ -1,3 +1,6 @@
+## v2.8.5
+- Fix preview and paint column offset
+
 ## v2.7.0
 - Knight Industries additions.
 
