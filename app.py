@@ -320,24 +320,175 @@ class BCBar(QWidget):
 # Per-effect parameter panel
 # ─────────────────────────────────────────────────────────────────────
 
+class KittKarrSwitch(QWidget):
+    """
+    iOS-style KITT/KARR switch using asset wordmark PNGs.
+
+    Expected assets:
+      assets/kitt.png
+      assets/karr.png
+
+    value 0 = KITT, knob left/red
+    value 1 = KARR, knob right/orange
+    """
+
+    valueChanged = Signal(int)
+
+    def __init__(self, value: int = 0, parent=None):
+        super().__init__(parent)
+        self._value = 1 if int(value) else 0
+        self.setFixedSize(156, 40)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("KITT / KARR")
+
+        self._kitt_pix = self._load_asset("kitt.png")
+        self._karr_pix = self._load_asset("karr.png")
+
+    def _load_asset(self, filename: str) -> QPixmap:
+        candidates = [
+            Path("assets") / filename,
+            Path(__file__).resolve().parent / "assets" / filename,
+        ]
+        for path in candidates:
+            try:
+                if path.exists():
+                    pm = QPixmap(str(path))
+                    if not pm.isNull():
+                        return pm
+            except Exception:
+                pass
+        return QPixmap()
+
+    def value(self) -> int:
+        return self._value
+
+    def setValue(self, value: int, emit: bool = True):
+        value = 1 if int(value) else 0
+        if value == self._value:
+            self.update()
+            return
+        self._value = value
+        self.update()
+        if emit:
+            self.valueChanged.emit(self._value)
+
+    def mousePressEvent(self, event):
+        self.setValue(0 if self._value else 1)
+
+    def _draw_wordmark_or_text(self, painter: QPainter, pixmap: QPixmap, text: str,
+                               lane_left: int, lane_right: int, color: QColor):
+        avail_w = max(20, lane_right - lane_left)
+        avail_h = max(12, self.height() - 8)
+
+        if pixmap and not pixmap.isNull():
+            scaled = pixmap.scaled(
+                avail_w,
+                avail_h,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+            tx = lane_left + max(0, (avail_w - scaled.width()) // 2)
+            ty = (self.height() - scaled.height()) // 2
+            painter.drawPixmap(tx, ty, scaled)
+            return
+
+        # Fallback if asset is missing.
+        painter.setPen(color)
+        painter.drawText(lane_left, 0, avail_w, self.height(), Qt.AlignCenter, text)
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+        radius = h // 2
+
+        # Track: black like the app background.
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#000000"))
+        p.drawRoundedRect(0, 0, w, h, radius, radius)
+
+        # Subtle outline.
+        p.setPen(QColor("#2b2b2b"))
+        p.drawRoundedRect(0, 0, w - 1, h - 1, radius, radius)
+
+        knob_d = h - 6
+        left_x = 3
+        right_x = w - knob_d - 3
+        x = left_x if self._value == 0 else right_x
+        knob_color = QColor("#ff232b") if self._value == 0 else QColor("#ff8a22")
+
+        if self._value == 0:
+            # KITT selected: red knob left, KITT wordmark on right.
+            self._draw_wordmark_or_text(
+                p,
+                self._kitt_pix,
+                "KITT",
+                left_x + knob_d + 8,
+                w - 8,
+                QColor("#ff232b"),
+            )
+        else:
+            # KARR selected: KARR wordmark on left, orange knob right.
+            self._draw_wordmark_or_text(
+                p,
+                self._karr_pix,
+                "KARR",
+                8,
+                right_x - 8,
+                QColor("#ff8a22"),
+            )
+
+        # Knob
+        p.setPen(Qt.NoPen)
+        p.setBrush(knob_color)
+        p.drawEllipse(x, 3, knob_d, knob_d)
+
+        p.end()
+
 class ParamPanel(QGroupBox):
     """
-    Dynamically generated sliders for the active effect's PARAMS dict.
-    Call load(effect_class, saved_vals) when the active effect changes.
-    Supports slider params (default) and text-input params (type="text").
+    Icon-pill parameter panel.
+
+    Model:
+    - KITT/KARR uses an iOS-style switch.
+    - Numeric parameters use flat single-color circular icon buttons.
+    - Clicking a numeric icon selects that parameter and shows its slider below.
+    - Presets still save the same raw values as before.
     """
 
     def __init__(self, driver: "MatrixDriver", parent=None):
         super().__init__("Effect Parameters", parent)
-        self._driver     = driver
-        self._outer      = QVBoxLayout(self)
-        self._outer.setSpacing(4)
-        self._outer.setContentsMargins(8, 6, 8, 6)
-        self._slider_map: dict[str, tuple] = {}   # attr -> (widget, scale, is_text)
+        self._driver = driver
+        self._outer = QVBoxLayout(self)
+        self._outer.setSpacing(8)
+        self._outer.setContentsMargins(8, 8, 8, 8)
+
+        self._slider_map: dict[str, tuple] = {}  # attr -> (widget/state, scale, kind)
+        self._effect_cls: type[BaseEffect] | None = None
+        self._params: dict = {}
+        self._active_attr: str | None = None
+        self._buttons: dict[str, QPushButton] = {}
+
+        self._slider_host: QWidget | None = None
+        self._active_label: QLabel | None = None
+        self._active_value: QLabel | None = None
+        self._active_slider: QSlider | None = None
+
         self._show_empty()
 
     def _clear(self):
         self._slider_map.clear()
+        self._effect_cls = None
+        self._params = {}
+        self._active_attr = None
+        self._buttons = {}
+        self._slider_host = None
+        self._active_label = None
+        self._active_value = None
+        self._active_slider = None
+
         while self._outer.count():
             item = self._outer.takeAt(0)
             w = item.widget()
@@ -361,90 +512,322 @@ class ParamPanel(QGroupBox):
         lbl.setStyleSheet("color:#555; font-size:11px;")
         self._outer.addWidget(lbl)
 
+    def _icon_for(self, attr: str, label: str) -> str:
+        """
+        Flat single-color iconography.
+
+        These are intentionally simple monochrome glyphs so the control strip
+        reads more like silhouettes than colorful emoji.
+        """
+        a = attr.lower()
+        l = label.lower()
+
+        if "sensitivity" in a or "sensitivity" in l:
+            return "∿"
+        if "boost" in a or "boost" in l:
+            return "▲"
+        if a in ("x_pos", "x", "offset_x") or "x position" in l or "offset x" in l:
+            return "↔"
+        if a in ("y_pos", "y", "offset_y") or "y position" in l or "offset y" in l:
+            return "↕"
+        if "speed" in a or "speed" in l:
+            return "▶"
+        if "falloff" in a or "falloff" in l:
+            return "◒"
+        if "floor" in a or "floor" in l:
+            return "▁"
+        if "width" in a or "width" in l:
+            return "▮"
+        if "height" in a or "height" in l:
+            return "▯"
+        if "brightness" in a or "brightness" in l:
+            return "●"
+        if "contrast" in a or "contrast" in l:
+            return "◐"
+        if "alpha" in a or "blend" in a or "opacity" in l:
+            return "α"
+        if "phase" in a or "angle" in a:
+            return "θ"
+        if "count" in a or "amount" in a:
+            return "#"
+        return label[:1].upper() if label else "•"
+
+    def _fmt_value(self, raw_value: int, scale: float, display: dict | None = None) -> str:
+        if display:
+            return display.get(int(raw_value), str(int(raw_value)))
+        fv = raw_value / scale
+        return f"{fv:.0f}" if scale == 1.0 else f"{fv:.2f}".rstrip("0").rstrip(".")
+
+    def _circle_style(self) -> str:
+        return (
+            "QPushButton{"
+            "min-width:34px;max-width:34px;min-height:34px;max-height:34px;"
+            "border-radius:17px;"
+            "background:#202020;"
+            "border:1px solid #444;"
+            "color:#f2f2f2;"
+            "font-size:16px;"
+            "font-weight:bold;"
+            "padding:0;"
+            "}"
+            "QPushButton:hover{border-color:#e8001d;background:#2a2a2a;color:#fff;}"
+            "QPushButton:checked{background:#e8001d;border-color:#e8001d;color:#fff;}"
+        )
+
+    def _refresh_button_states(self):
+        for attr, btn in self._buttons.items():
+            btn.setChecked(attr == self._active_attr)
+
+    def _make_pill(self) -> tuple[QFrame, QHBoxLayout]:
+        pill = QFrame()
+        pill.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        pill.setStyleSheet(
+            "QFrame{background:#101010;border:1px solid #2b2b2b;"
+            "border-radius:24px;padding:4px;}"
+        )
+        row = QHBoxLayout(pill)
+        row.setContentsMargins(8, 6, 8, 6)
+        row.setSpacing(8)
+        return pill, row
+
+    def _make_slider_host(self) -> QWidget:
+        host = QWidget()
+        host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        host.setVisible(False)
+        host.setStyleSheet(
+            "QWidget{background:#101010;border:1px solid #252525;"
+            "border-radius:10px;}"
+        )
+
+        root = QVBoxLayout(host)
+        root.setContentsMargins(10, 8, 10, 8)
+        root.setSpacing(5)
+
+        top = QHBoxLayout()
+        top.setSpacing(8)
+
+        self._active_label = QLabel("")
+        self._active_label.setStyleSheet("color:#aaa;font-size:11px;font-weight:bold;")
+
+        self._active_value = QLabel("")
+        self._active_value.setFixedWidth(54)
+        self._active_value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._active_value.setStyleSheet("color:#fff;font-size:11px;")
+
+        top.addWidget(self._active_label)
+        top.addStretch()
+        top.addWidget(self._active_value)
+        root.addLayout(top)
+
+        self._active_slider = QSlider(Qt.Horizontal)
+        self._active_slider.setMinimumHeight(26)
+        self._active_slider.setStyleSheet(
+            "QSlider::groove:horizontal{height:5px;background:#2b2b2b;border-radius:2px;}"
+            "QSlider::sub-page:horizontal{background:#e8001d;border-radius:2px;}"
+            "QSlider::add-page:horizontal{background:#3a3a3a;border-radius:2px;}"
+            "QSlider::handle:horizontal{background:#f2f2f2;border:2px solid #e8001d;"
+            "width:18px;height:18px;margin:-8px 0;border-radius:9px;}"
+        )
+        self._active_slider.valueChanged.connect(self._active_slider_changed)
+        root.addWidget(self._active_slider)
+
+        return host
+
+    def _set_style_switch_value(self, attr: str, raw_value: int):
+        entry = self._slider_map.get(attr)
+        if not entry:
+            return
+        widget, _scale, kind = entry
+        if kind != "style":
+            return
+        value = 1 if int(raw_value) >= 1 else 0
+        widget.setValue(value, emit=False)
+        self._driver.set_effect_param(attr, float(value))
+
+    def _style_changed(self, attr: str, value: int):
+        self._driver.set_effect_param(attr, float(value))
+
+    def _select_numeric(self, attr: str):
+        self._active_attr = attr
+        self._refresh_button_states()
+
+        entry = self._slider_map.get(attr)
+        if not entry or not self._active_slider or not self._active_label or not self._active_value or not self._slider_host:
+            return
+
+        state, scale, kind = entry
+        if kind != "slider":
+            return
+
+        p = state["param"]
+        display = p.get("display")
+        value = int(state["value"])
+
+        self._active_label.setText(p["label"])
+        self._active_value.setText(self._fmt_value(value, scale, display))
+
+        self._active_slider.blockSignals(True)
+        self._active_slider.setRange(int(p["min"]), int(p["max"]))
+        self._active_slider.setValue(value)
+        self._active_slider.blockSignals(False)
+
+        self._slider_host.setVisible(True)
+
+    def _active_slider_changed(self, raw_value: int):
+        attr = self._active_attr
+        if not attr:
+            return
+
+        entry = self._slider_map.get(attr)
+        if not entry:
+            return
+
+        state, scale, kind = entry
+        if kind != "slider":
+            return
+
+        state["value"] = int(raw_value)
+
+        display = state["param"].get("display")
+        if self._active_value:
+            self._active_value.setText(self._fmt_value(raw_value, scale, display))
+
+        self._driver.set_effect_param(attr, raw_value / scale)
+
+    def _reset_current(self):
+        if not self._params:
+            return
+
+        for attr, p in self._params.items():
+            entry = self._slider_map.get(attr)
+            if not entry:
+                continue
+
+            state, scale, kind = entry
+            default = p.get("default", "")
+
+            if kind == "text":
+                widget = state["widget"]
+                widget.blockSignals(True)
+                widget.setText(str(default))
+                widget.blockSignals(False)
+                self._driver.set_effect_param(attr, str(default))
+
+            elif kind == "style":
+                self._set_style_switch_value(attr, int(default))
+
+            elif kind == "slider":
+                lo, hi = int(p["min"]), int(p["max"])
+                raw = max(lo, min(hi, int(default)))
+                state["value"] = raw
+                self._driver.set_effect_param(attr, raw / scale)
+
+                if attr == self._active_attr:
+                    self._select_numeric(attr)
+
     def load(self, effect_cls: type[BaseEffect], saved_vals: dict | None = None):
-        """Rebuild controls from effect_cls.PARAMS, seeding from saved_vals when provided."""
         self._clear()
-        params = getattr(effect_cls, "PARAMS", {})
+        self._effect_cls = effect_cls
+        self._params = dict(getattr(effect_cls, "PARAMS", {}) or {})
+
+        params = self._params
         if not params:
             self._show_empty()
             return
 
-        grid = QGridLayout()
-        grid.setSpacing(4)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setColumnStretch(1, 1)
+        header = QHBoxLayout()
+        title = QLabel(effect_cls.name)
+        title.setStyleSheet("color:#e8001d;font-size:12px;font-weight:bold;")
 
-        for row_i, (attr, p) in enumerate(params.items()):
-            lbl = QLabel(p["label"])
-            lbl.setStyleSheet("color:#aaa; font-size:11px;")
-            grid.addWidget(lbl, row_i, 0)
+        reset_btn = QPushButton("↺")
+        reset_btn.setToolTip("Reset this effect")
+        reset_btn.setFixedSize(28, 28)
+        reset_btn.setStyleSheet(
+            "QPushButton{background:#191919;color:#888;border:1px solid #333;"
+            "border-radius:14px;font-size:15px;padding:0;}"
+            "QPushButton:hover{color:#fff;border-color:#e8001d;}"
+        )
+        reset_btn.clicked.connect(self._reset_current)
+
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(reset_btn)
+        self._outer.addLayout(header)
+
+        pill, pill_row = self._make_pill()
+        first_numeric_attr = None
+
+        for attr, p in params.items():
+            label = p["label"]
+            saved_has_attr = saved_vals is not None and attr in saved_vals
 
             if p.get("type") == "text":
-                # ── Text input ───────────────────────────────────────
-                init_text = str(saved_vals.get(attr, p.get("default", ""))) if saved_vals else str(p.get("default", ""))
+                init_text = str(saved_vals.get(attr, p.get("default", ""))) if saved_has_attr else str(p.get("default", ""))
                 edit = QLineEdit(init_text)
+                edit.setPlaceholderText(label)
                 edit.setStyleSheet(
-                    "QLineEdit{background:#1a1a1a;color:#ccc;border:1px solid #333;"
-                    "padding:2px 6px;border-radius:3px;font-size:11px;}"
+                    "QLineEdit{background:#191919;color:#ccc;border:1px solid #333;"
+                    "padding:6px 10px;border-radius:14px;font-size:11px;}"
                     "QLineEdit:focus{border-color:#e8001d;}"
                 )
                 _attr = attr
                 edit.textChanged.connect(lambda txt, a=_attr: self._driver.set_effect_param(a, txt))
-                grid.addWidget(edit, row_i, 1, 1, 2)
-                self._slider_map[attr] = (edit, 1.0, True)
+                pill_row.addWidget(edit, 1)
+                self._slider_map[attr] = ({"widget": edit, "label": label}, 1.0, "text")
+                continue
 
-            else:
-                # ── Slider ───────────────────────────────────────────
-                scale   = float(p["scale"])
-                lo, hi  = int(p["min"]), int(p["max"])
-                display = p.get("display")
+            lo, hi = int(p["min"]), int(p["max"])
+            default = int(p["default"])
+            init = max(lo, min(hi, int(saved_vals[attr]))) if saved_has_attr else default
 
-                if saved_vals and attr in saved_vals:
-                    init = max(lo, min(hi, int(saved_vals[attr])))
-                else:
-                    init = int(p["default"])
+            is_binary_style = attr.lower() == "style" and lo == 0 and hi == 1
 
-                sld = QSlider(Qt.Horizontal)
-                sld.setRange(lo, hi)
-                sld.setValue(init)
-                self._slider_map[attr] = (sld, scale, False)
+            if is_binary_style:
+                switch = KittKarrSwitch(init)
+                switch.valueChanged.connect(lambda value, a=attr: self._style_changed(a, value))
+                pill_row.addWidget(switch)
+                self._slider_map[attr] = (switch, 1.0, "style")
+                self._set_style_switch_value(attr, init)
+                continue
 
-                if display:
-                    def _fmt_d(v, d=display): return d.get(int(v), str(int(v)))
-                    fmt_fn = _fmt_d
-                else:
-                    def _fmt_n(v, s=scale):
-                        fv = v / s
-                        return f"{fv:.0f}" if s == 1.0 else f"{fv:.2f}".rstrip("0").rstrip(".")
-                    fmt_fn = _fmt_n
+            btn = QPushButton()
+            btn.setCheckable(True)
+            btn.setStyleSheet(self._circle_style())
+            icon = self._icon_for(attr, label)
+            btn.setText(icon)
+            btn.setToolTip(label)
+            self._buttons[attr] = btn
 
-                val_lbl = QLabel(fmt_fn(init))
-                val_lbl.setFixedWidth(38)
-                val_lbl.setStyleSheet("color:#ccc; font-size:11px;")
+            scale = float(p["scale"])
+            self._slider_map[attr] = (
+                {"value": init, "param": p},
+                scale,
+                "slider",
+            )
+            if first_numeric_attr is None:
+                first_numeric_attr = attr
+            btn.clicked.connect(lambda _=False, a=attr: self._select_numeric(a))
+            pill_row.addWidget(btn)
 
-                _attr = attr
-                def _on_change(v, a=_attr, s=scale, vl=val_lbl, f=fmt_fn):
-                    vl.setText(f(v))
-                    self._driver.set_effect_param(a, v / s)
+        pill_row.addStretch()
+        self._outer.addWidget(pill)
 
-                sld.valueChanged.connect(_on_change)
-                grid.addWidget(sld,     row_i, 1)
-                grid.addWidget(val_lbl, row_i, 2)
+        self._slider_host = self._make_slider_host()
+        self._outer.addWidget(self._slider_host)
 
-        container = QWidget()
-        container.setLayout(grid)
-        self._outer.addWidget(container)
+        if first_numeric_attr:
+            self._select_numeric(first_numeric_attr)
 
     def get_values(self) -> dict:
-        """Return {attr: value} for all current controls (slider int or text string)."""
         out = {}
-        for attr, (widget, scale, is_text) in self._slider_map.items():
-            if is_text:
-                out[attr] = widget.text()
+        for attr, (state, scale, kind) in self._slider_map.items():
+            if kind == "text":
+                out[attr] = state["widget"].text()
+            elif kind == "style":
+                out[attr] = int(state.value())
             else:
-                out[attr] = widget.value()
+                out[attr] = int(state.get("value", 0))
         return out
-
 
 # ─────────────────────────────────────────────────────────────────────
 # Quick Controls popup
@@ -1482,7 +1865,7 @@ class ControlWindow(QWidget):
         self._settings = settings or Settings()
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(_make_icon())
-        self.setMinimumWidth(640)
+        self.setMinimumWidth(760)
         self.setStyleSheet(_STYLE)
 
         # Status row
@@ -1836,8 +2219,10 @@ class ControlWindow(QWidget):
         fps  = int(1.0 / dt) if dt > 0 else 0
         mode = self._driver.mode.upper()
         conn = "Connected" if self._driver.connected else "Disconnected"
+        effect = self._driver.current_effect_name()
+        effect_bits = f"   Effect: {effect}" if effect else ""
         self._debug_label.setText(
-            f"Device: {conn}   FPS: {fps}   Mode: {mode}"
+            f"Device: {conn}   FPS: {fps}   Mode: {mode}{effect_bits}"
         )
 
     def _get_startup(self) -> bool:
