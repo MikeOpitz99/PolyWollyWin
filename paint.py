@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, Signal, QPoint
 from PySide6.QtGui import QPainter, QColor, QPen, QMouseEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QSlider, QLabel, QSizePolicy, QFrame,
+    QSlider, QLabel, QSizePolicy, QFrame, QSpinBox,
 )
 from renderer import ROWS, COLS, MASK_NP, logical_to_physical, apply_mask, blank_frame
 
@@ -239,6 +239,62 @@ class PaintEditor(QWidget):
         hint = QLabel("Left-click: paint  ·  Right-click: erase  ·  Drag to draw")
         hint.setStyleSheet("color:#555; font-size:10px;")
 
+        # ── Frame animation row ───────────────────────────────────── #
+        # Up to 3 paint frames for simple animations.
+        # Clicking a frame button switches the canvas to that frame.
+        self._frames: list[np.ndarray] = [
+            blank_frame().copy().astype(np.uint8) for _ in range(3)
+        ]
+        self._current_frame_idx = 0
+        self._anim_timer = None   # QTimer, set when animating
+
+        frame_row = QHBoxLayout(); frame_row.setSpacing(4)
+        frame_row.addWidget(QLabel("Frames:"))
+        self._frame_btns: list[QPushButton] = []
+        for i in range(3):
+            b = QPushButton(f"F{i+1}")
+            b.setFixedWidth(32); b.setFixedHeight(22)
+            b.setCheckable(True)
+            b.setStyleSheet("font-size:10px; padding:1px 3px;")
+            b.clicked.connect(lambda _, idx=i: self._switch_frame(idx))
+            self._frame_btns.append(b)
+            frame_row.addWidget(b)
+        self._frame_btns[0].setChecked(True)
+
+        frame_row.addSpacing(8)
+
+        self._anim_btn = QPushButton("▶ Animate")
+        self._anim_btn.setFixedHeight(22)
+        self._anim_btn.setStyleSheet("font-size:10px; padding:1px 6px;")
+        self._anim_btn.clicked.connect(self._toggle_animate)
+        frame_row.addWidget(self._anim_btn)
+
+        fps_label = QLabel("FPS:")
+        fps_label.setStyleSheet("color:#888; font-size:10px;")
+        self._fps_spin = QSpinBox()
+        self._fps_spin.setRange(1, 30); self._fps_spin.setValue(4)
+        self._fps_spin.setFixedWidth(46); self._fps_spin.setFixedHeight(22)
+        self._fps_spin.setStyleSheet(
+            "QSpinBox{background:#1a1a1a;color:#ccc;border:1px solid #333;"
+            "font-size:10px;padding:1px 2px;}"
+        )
+        frame_row.addWidget(fps_label)
+        frame_row.addWidget(self._fps_spin)
+        frame_row.addStretch()
+
+        # ── File I/O row ──────────────────────────────────────────── #
+        io_row = QHBoxLayout(); io_row.setSpacing(4)
+        save_btn  = QPushButton("⬆ Export PNG")
+        load_btn  = QPushButton("⬇ Import PNG")
+        save_btn.setFixedHeight(22); load_btn.setFixedHeight(22)
+        for btn in (save_btn, load_btn):
+            btn.setStyleSheet("font-size:10px; padding:1px 6px;")
+        save_btn.clicked.connect(self._export_png)
+        load_btn.clicked.connect(self._import_png)
+        io_row.addWidget(save_btn)
+        io_row.addWidget(load_btn)
+        io_row.addStretch()
+
         # ── Layout ───────────────────────────────────────────────── #
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -246,7 +302,82 @@ class PaintEditor(QWidget):
         layout.addLayout(palette_row)
         layout.addLayout(tools_row)
         layout.addWidget(hint)
+        layout.addLayout(frame_row)
+        layout.addLayout(io_row)
         layout.addWidget(self.canvas)
+
+    # ── Frame management ──────────────────────────────────────────── #
+
+    def _switch_frame(self, idx: int):
+        # Save current canvas state to the current frame slot
+        self._frames[self._current_frame_idx] = self.canvas._frame.copy()
+        # Load the new frame
+        self._current_frame_idx = idx
+        self.canvas.load_frame(self._frames[idx])
+        for i, btn in enumerate(self._frame_btns):
+            btn.setChecked(i == idx)
+
+    def _toggle_animate(self):
+        if self._anim_timer and self._anim_timer.isActive():
+            self._anim_timer.stop()
+            self._anim_btn.setText("▶ Animate")
+        else:
+            # Save current frame before animating
+            self._frames[self._current_frame_idx] = self.canvas._frame.copy()
+            if self._anim_timer is None:
+                from PySide6.QtCore import QTimer as _QTimer
+                self._anim_timer = _QTimer()
+                self._anim_timer.timeout.connect(self._anim_tick)
+            interval = max(33, int(1000 / max(1, self._fps_spin.value())))
+            self._anim_timer.setInterval(interval)
+            self._anim_timer.start()
+            self._anim_btn.setText("⏹ Stop")
+
+    def _anim_tick(self):
+        next_idx = (self._current_frame_idx + 1) % 3
+        self._switch_frame(next_idx)
+        # Emit so the driver can pick it up if the Paint tab is live
+        self.frame_ready.emit(self.canvas.get_physical())
+
+    # ── PNG export / import ───────────────────────────────────────── #
+
+    def _export_png(self):
+        from PySide6.QtWidgets import QFileDialog as _FD
+        path, _ = _FD.getSaveFileName(self, "Export paint frame as PNG", "frame.png",
+                                       "PNG images (*.png)")
+        if not path:
+            return
+        try:
+            from PIL import Image
+            frame = apply_mask(self.canvas._frame)
+            from renderer import physical_to_logical, PHYSICAL_LED_COUNT
+            # Scale up by a factor for a visible PNG (each LED = 8×8 px block)
+            SCALE = 8
+            img_arr = np.zeros((ROWS * SCALE, COLS * SCALE), dtype=np.uint8)
+            for r in range(ROWS):
+                for c in range(COLS):
+                    v = int(frame[r, c])
+                    img_arr[r*SCALE:(r+1)*SCALE, c*SCALE:(c+1)*SCALE] = v
+            Image.fromarray(img_arr, mode="L").save(path)
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox as _MB
+            _MB.warning(self, "Export failed", str(e))
+
+    def _import_png(self):
+        from PySide6.QtWidgets import QFileDialog as _FD
+        path, _ = _FD.getOpenFileName(self, "Import PNG as paint frame", "",
+                                       "Images (*.png *.jpg *.jpeg *.bmp)")
+        if not path:
+            return
+        try:
+            from PIL import Image
+            img = Image.open(path).convert("L").resize((COLS, ROWS), Image.LANCZOS)
+            arr = np.array(img, dtype=np.uint8)
+            self.canvas.load_frame(apply_mask(arr))
+            self._frames[self._current_frame_idx] = self.canvas._frame.copy()
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox as _MB
+            _MB.warning(self, "Import failed", str(e))
 
     def _select_palette(self, selected: PaletteButton):
         for btn in self._palette_btns:

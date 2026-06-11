@@ -18,6 +18,8 @@ if sys.platform == "win32":
         ctypes.windll.kernel32.FreeConsole()
 
 import sys
+import os
+import re
 import time
 import json
 import threading
@@ -34,7 +36,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QSlider, QFileDialog,
     QFrame, QTabWidget, QScrollArea, QSizePolicy,
     QGroupBox, QCheckBox, QMessageBox, QListWidget,
-    QComboBox, QDoubleSpinBox,
+    QComboBox, QDoubleSpinBox, QLineEdit, QInputDialog,
 )
 
 from version import VERSION
@@ -59,6 +61,68 @@ LATEST_RELEASE_API = (
 
 TICK_HZ = 30
 TICK_MS  = 1000 // TICK_HZ
+
+PRESET_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "PolyWollyWin" / "presets"
+PRESET_DIR.mkdir(parents=True, exist_ok=True)
+
+# ─────────────────────────────────────────────────────────────────────
+# Preset manager  (JSON files, not registry)
+# ─────────────────────────────────────────────────────────────────────
+
+class PresetManager:
+    """
+    Saves and loads named effect presets as individual JSON files in
+    %LOCALAPPDATA%/PolyWollyWin/presets/.
+
+    Preset schema:
+      { "name": str, "effect": str, "params": {attr: value}, "brightness": int, "contrast": int }
+    """
+
+    def __init__(self, directory: Path = PRESET_DIR):
+        self._dir = directory
+        self._dir.mkdir(parents=True, exist_ok=True)
+
+    def _path(self, name: str) -> Path:
+        safe = re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_') or "preset"
+        return self._dir / f"{safe}.json"
+
+    def save(self, preset: dict):
+        """Write preset dict to disk.  Overwrites if name already exists."""
+        path = self._path(preset["name"])
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(preset, f, indent=2)
+
+    def load_all(self) -> list[dict]:
+        """Return all presets sorted by name."""
+        out = []
+        for p in sorted(self._dir.glob("*.json")):
+            try:
+                with open(p, encoding="utf-8") as f:
+                    out.append(json.load(f))
+            except Exception:
+                pass
+        return out
+
+    def delete(self, name: str):
+        p = self._path(name)
+        if p.exists():
+            p.unlink()
+
+    def export_to_file(self, dest: str):
+        """Export all presets as a single JSON array file."""
+        with open(dest, "w", encoding="utf-8") as f:
+            json.dump(self.load_all(), f, indent=2)
+
+    def import_from_file(self, src: str):
+        """Import presets from a single JSON array file (merges, overwrites on name collision)."""
+        with open(src, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            data = [data]
+        for p in data:
+            if isinstance(p, dict) and "name" in p:
+                self.save(p)
+
 
 # ─────────────────────────────────────────────────────────────────────
 # Settings persistence
@@ -89,20 +153,6 @@ class Settings:
     def get_audio_boost(self)       -> int: return int(self._s.value("audio_boost", 1800))
     def get_audio_falloff(self)     -> int: return int(self._s.value("audio_falloff", 80))
     def get_audio_floor(self)       -> int: return int(self._s.value("audio_floor", 8))
-
-    def get_effect_params(self, name: str) -> dict:
-        """Return {attr: slider_int} saved for this effect, or {} if none."""
-        raw = self._s.value(f"ep/{name}", {})
-        if isinstance(raw, dict):
-            try:
-                return {k: int(v) for k, v in raw.items()}
-            except Exception:
-                pass
-        return {}
-
-    def set_effect_params(self, name: str, params: dict):
-        """Save {attr: slider_int} for this effect."""
-        self._s.setValue(f"ep/{name}", params)
 
     def set_effect_speed(self, v: float): self._s.setValue("effect_speed", v)
     def set_brightness(self, v: int):     self._s.setValue("brightness", v)
@@ -273,20 +323,21 @@ class BCBar(QWidget):
 class ParamPanel(QGroupBox):
     """
     Dynamically generated sliders for the active effect's PARAMS dict.
-    Call load(effect_class, driver) when the active effect changes.
+    Call load(effect_class, saved_vals) when the active effect changes.
+    Supports slider params (default) and text-input params (type="text").
     """
 
     def __init__(self, driver: "MatrixDriver", parent=None):
         super().__init__("Effect Parameters", parent)
-        self._driver = driver
-        self._outer  = QVBoxLayout(self)
+        self._driver     = driver
+        self._outer      = QVBoxLayout(self)
         self._outer.setSpacing(4)
         self._outer.setContentsMargins(8, 6, 8, 6)
-        self._inner  = None          # current inner layout/widget
-        self._slider_map: dict[str, tuple] = {}   # attr -> (QSlider, scale)
+        self._slider_map: dict[str, tuple] = {}   # attr -> (widget, scale, is_text)
         self._show_empty()
 
     def _clear(self):
+        self._slider_map.clear()
         while self._outer.count():
             item = self._outer.takeAt(0)
             w = item.widget()
@@ -311,12 +362,8 @@ class ParamPanel(QGroupBox):
         self._outer.addWidget(lbl)
 
     def load(self, effect_cls: type[BaseEffect], saved_vals: dict | None = None):
-        """
-        Rebuild sliders from effect_cls.PARAMS.
-        saved_vals: {attr: slider_int} — overrides defaults when provided.
-        """
+        """Rebuild controls from effect_cls.PARAMS, seeding from saved_vals when provided."""
         self._clear()
-        self._slider_map: dict[str, tuple] = {}   # attr -> (QSlider, scale)
         params = getattr(effect_cls, "PARAMS", {})
         if not params:
             self._show_empty()
@@ -328,57 +375,75 @@ class ParamPanel(QGroupBox):
         grid.setColumnStretch(1, 1)
 
         for row_i, (attr, p) in enumerate(params.items()):
-            scale   = float(p["scale"])
-            lo, hi  = int(p["min"]), int(p["max"])
-            display = p.get("display")   # optional {int_val: str_label} mapping
-
-            # Prefer saved slider value; fall back to PARAMS default
-            if saved_vals and attr in saved_vals:
-                init = max(lo, min(hi, int(saved_vals[attr])))
-            else:
-                init = int(p["default"])
-
             lbl = QLabel(p["label"])
             lbl.setStyleSheet("color:#aaa; font-size:11px;")
+            grid.addWidget(lbl, row_i, 0)
 
-            sld = QSlider(Qt.Horizontal)
-            sld.setRange(lo, hi)
-            sld.setValue(init)
-            self._slider_map[attr] = (sld, scale)
+            if p.get("type") == "text":
+                # ── Text input ───────────────────────────────────────
+                init_text = str(saved_vals.get(attr, p.get("default", ""))) if saved_vals else str(p.get("default", ""))
+                edit = QLineEdit(init_text)
+                edit.setStyleSheet(
+                    "QLineEdit{background:#1a1a1a;color:#ccc;border:1px solid #333;"
+                    "padding:2px 6px;border-radius:3px;font-size:11px;}"
+                    "QLineEdit:focus{border-color:#e8001d;}"
+                )
+                _attr = attr
+                edit.textChanged.connect(lambda txt, a=_attr: self._driver.set_effect_param(a, txt))
+                grid.addWidget(edit, row_i, 1, 1, 2)
+                self._slider_map[attr] = (edit, 1.0, True)
 
-            # Value display — use display mapping for discrete direction params
-            if display:
-                def _fmt_d(v, d=display):
-                    return d.get(int(v), str(int(v)))
-                fmt_fn = _fmt_d
             else:
-                def _fmt_n(v, s=scale):
-                    fv = v / s
-                    return f"{fv:.0f}" if s == 1.0 else f"{fv:.2f}".rstrip("0").rstrip(".")
-                fmt_fn = _fmt_n
+                # ── Slider ───────────────────────────────────────────
+                scale   = float(p["scale"])
+                lo, hi  = int(p["min"]), int(p["max"])
+                display = p.get("display")
 
-            val_lbl = QLabel(fmt_fn(init))
-            val_lbl.setFixedWidth(38)
-            val_lbl.setStyleSheet("color:#ccc; font-size:11px;")
+                if saved_vals and attr in saved_vals:
+                    init = max(lo, min(hi, int(saved_vals[attr])))
+                else:
+                    init = int(p["default"])
 
-            _attr = attr
-            def _on_change(v, a=_attr, s=scale, vl=val_lbl, f=fmt_fn):
-                vl.setText(f(v))
-                self._driver.set_effect_param(a, v / s)
+                sld = QSlider(Qt.Horizontal)
+                sld.setRange(lo, hi)
+                sld.setValue(init)
+                self._slider_map[attr] = (sld, scale, False)
 
-            sld.valueChanged.connect(_on_change)
+                if display:
+                    def _fmt_d(v, d=display): return d.get(int(v), str(int(v)))
+                    fmt_fn = _fmt_d
+                else:
+                    def _fmt_n(v, s=scale):
+                        fv = v / s
+                        return f"{fv:.0f}" if s == 1.0 else f"{fv:.2f}".rstrip("0").rstrip(".")
+                    fmt_fn = _fmt_n
 
-            grid.addWidget(lbl,     row_i, 0)
-            grid.addWidget(sld,     row_i, 1)
-            grid.addWidget(val_lbl, row_i, 2)
+                val_lbl = QLabel(fmt_fn(init))
+                val_lbl.setFixedWidth(38)
+                val_lbl.setStyleSheet("color:#ccc; font-size:11px;")
+
+                _attr = attr
+                def _on_change(v, a=_attr, s=scale, vl=val_lbl, f=fmt_fn):
+                    vl.setText(f(v))
+                    self._driver.set_effect_param(a, v / s)
+
+                sld.valueChanged.connect(_on_change)
+                grid.addWidget(sld,     row_i, 1)
+                grid.addWidget(val_lbl, row_i, 2)
 
         container = QWidget()
         container.setLayout(grid)
         self._outer.addWidget(container)
 
     def get_values(self) -> dict:
-        """Return {attr: slider_int} for all current sliders (for persistence)."""
-        return {attr: sld.value() for attr, (sld, _scale) in self._slider_map.items()}
+        """Return {attr: value} for all current controls (slider int or text string)."""
+        out = {}
+        for attr, (widget, scale, is_text) in self._slider_map.items():
+            if is_text:
+                out[attr] = widget.text()
+            else:
+                out[attr] = widget.value()
+        return out
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -486,6 +551,12 @@ class MatrixDriver(QObject):
         self._xfade_from:   list[int] | None = None
         self._last_raw:     list[int] = [0] * PHYSICAL_LED_COUNT
 
+        # ── Screen-react state ───────────────────────────────────────
+        self._screen_react    = False
+        self._screen_level    = 1.0
+        self._screen_timer    = 0.0
+        self._screen_interval = 0.12   # sample every ~120 ms
+
     # ── connection ────────────────────────────────────────────────────
 
     def connect(self) -> str | None:
@@ -530,6 +601,9 @@ class MatrixDriver(QObject):
     def set_crossfade_enabled(self, v: bool):
         with self._lock: self._xfade_enabled = v
 
+    def set_screen_react(self, v: bool):
+        with self._lock: self._screen_react = v
+
     def set_crossfade_dur(self, v: float):
         with self._lock: self._xfade_dur = max(0.0, v)
 
@@ -543,12 +617,6 @@ class MatrixDriver(QObject):
         with self._lock:
             if self._effect and hasattr(self._effect, attr):
                 setattr(self._effect, attr, value)
-
-    def set_blend_effect_param(self, attr: str, value: float):
-        """Live-update a parameter on the blend Layer B instance."""
-        with self._lock:
-            if self._effect2 and hasattr(self._effect2, attr):
-                setattr(self._effect2, attr, value)
 
     # ── mode switches ─────────────────────────────────────────────────
 
@@ -672,6 +740,15 @@ class MatrixDriver(QObject):
             if bri < 1.0:
                 raw = [int(v * bri) for v in raw]
 
+            # ── screen-react multiplier ───────────────────────────────
+            if self._screen_react:
+                self._screen_timer += dt
+                if self._screen_timer >= self._screen_interval:
+                    self._screen_timer = 0.0
+                    self._screen_level = self._sample_screen()
+                if self._screen_level < 0.999:
+                    raw = [int(v * self._screen_level) for v in raw]
+
             # ── crossfade overlay ────────────────────────────────────
             if self._xfade_from is not None:
                 self._xfade_t += dt
@@ -690,6 +767,19 @@ class MatrixDriver(QObject):
         except Exception:
             pass
         self.frame_rendered.emit(raw)
+
+    @staticmethod
+    def _sample_screen() -> float:
+        """Return 0.1–1.0 average screen brightness via Pillow ImageGrab."""
+        try:
+            from PIL import ImageGrab
+            import numpy as _np
+            img = ImageGrab.grab(bbox=None)
+            img = img.resize((64, 36))
+            arr = _np.asarray(img.convert("L"), dtype=_np.float32)
+            return max(0.10, float(_np.mean(arr)) / 255.0)
+        except Exception:
+            return 1.0
 
     def cleanup(self):
         with self._lock:
@@ -1191,6 +1281,197 @@ class AudioTab(QWidget):
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Preset panel tab
+# ─────────────────────────────────────────────────────────────────────
+
+class PresetPanel(QWidget):
+    """
+    Named effect presets stored as JSON files in
+    %LOCALAPPDATA%/PolyWollyWin/presets/.
+
+    Each preset saves: effect name, all current param values,
+    brightness, and contrast.  Double-click or Load button applies it.
+    Export/Import move a single bundle file containing all presets.
+    """
+
+    preset_activated = Signal(dict)   # emits the preset dict when applied
+
+    def __init__(self, driver: "MatrixDriver", param_panel: "ParamPanel",
+                 bc_bar: "BCBar", settings: "Settings", parent=None):
+        super().__init__(parent)
+        self._driver      = driver
+        self._param_panel = param_panel
+        self._bc          = bc_bar
+        self._settings    = settings
+        self._mgr         = PresetManager()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        layout.addWidget(_label("Saved Presets", "#888"))
+
+        self._list = QListWidget()
+        self._list.setStyleSheet(
+            "QListWidget{background:#111;color:#ccc;border:1px solid #2a2a2a;font-size:12px;}"
+            "QListWidget::item{padding:4px;}"
+            "QListWidget::item:selected{background:#2a0005;color:#fff;}"
+        )
+        self._list.setMinimumHeight(140)
+        self._list.itemDoubleClicked.connect(lambda _: self._load_selected())
+        layout.addWidget(self._list)
+
+        # ── Action buttons ────────────────────────────────────────────
+        btn_row1 = QHBoxLayout(); btn_row1.setSpacing(6)
+        save_btn   = QPushButton("💾 Save current")
+        load_btn   = QPushButton("▶ Load")
+        delete_btn = QPushButton("✕ Delete")
+        for btn in (save_btn, load_btn, delete_btn):
+            btn.setMinimumHeight(30)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        save_btn.clicked.connect(self._save_current)
+        load_btn.clicked.connect(self._load_selected)
+        delete_btn.clicked.connect(self._delete_selected)
+        btn_row1.addWidget(save_btn)
+        btn_row1.addWidget(load_btn)
+        btn_row1.addWidget(delete_btn)
+        layout.addLayout(btn_row1)
+
+        layout.addWidget(_sep())
+
+        # ── Export / Import ───────────────────────────────────────────
+        io_row = QHBoxLayout(); io_row.setSpacing(6)
+        exp_btn = QPushButton("⬆ Export all…")
+        imp_btn = QPushButton("⬇ Import…")
+        open_dir_btn = QPushButton("📁 Open folder")
+        for btn in (exp_btn, imp_btn, open_dir_btn):
+            btn.setMinimumHeight(26)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        exp_btn.clicked.connect(self._export)
+        imp_btn.clicked.connect(self._import)
+        open_dir_btn.clicked.connect(lambda: QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(PRESET_DIR))
+        ))
+        io_row.addWidget(exp_btn)
+        io_row.addWidget(imp_btn)
+        io_row.addWidget(open_dir_btn)
+        layout.addLayout(io_row)
+
+        self._status = QLabel("")
+        self._status.setStyleSheet("color:#666; font-size:10px;")
+        layout.addWidget(self._status)
+        layout.addStretch()
+
+        self._refresh_list()
+
+    # ── list management ───────────────────────────────────────────────
+
+    def _refresh_list(self):
+        self._list.clear()
+        for p in self._mgr.load_all():
+            self._list.addItem(f"  {p.get('name', '?')}  —  {p.get('effect', '?')}")
+
+    def _selected_preset(self) -> dict | None:
+        row = self._list.currentRow()
+        presets = self._mgr.load_all()
+        return presets[row] if 0 <= row < len(presets) else None
+
+    # ── save ──────────────────────────────────────────────────────────
+
+    def _save_current(self):
+        effect = self._driver.current_effect_name()
+        if not effect:
+            self._status.setText("No active effect to save.")
+            return
+        name, ok = QInputDialog.getText(self, "Save Preset", "Preset name:")
+        if not ok or not name.strip():
+            return
+        preset = {
+            "name":       name.strip(),
+            "effect":     effect,
+            "params":     self._param_panel.get_values(),
+            "brightness": self._bc.bri.value(),
+            "contrast":   self._bc.con.value(),
+        }
+        self._mgr.save(preset)
+        self._refresh_list()
+        self._status.setText(f"Saved: {name.strip()}")
+
+    # ── load ──────────────────────────────────────────────────────────
+
+    def _load_selected(self):
+        p = self._selected_preset()
+        if not p:
+            return
+        effect = p.get("effect", "")
+        params = p.get("params", {})
+        bri    = p.get("brightness", 100)
+        con    = p.get("contrast",   100)
+
+        # Apply brightness / contrast
+        self._bc.bri.setValue(int(bri))
+        self._bc.con.setValue(int(con))
+
+        # Launch the effect with saved params
+        self._driver.set_mode_effect(effect)
+        saved = {}
+        for cls in ALL_EFFECTS:
+            if cls.name == effect:
+                self._param_panel.load(cls, saved_vals=params)
+                # Apply each param to the live effect
+                for attr, p_spec in cls.PARAMS.items():
+                    if attr in params:
+                        val = params[attr]
+                        if p_spec.get("type") == "text":
+                            self._driver.set_effect_param(attr, str(val))
+                        else:
+                            scale = float(p_spec["scale"])
+                            self._driver.set_effect_param(attr, int(val) / scale)
+                break
+
+        self._status.setText(f"Loaded: {p.get('name')}")
+        self.preset_activated.emit(p)
+
+    # ── delete ────────────────────────────────────────────────────────
+
+    def _delete_selected(self):
+        p = self._selected_preset()
+        if not p:
+            return
+        name = p.get("name", "")
+        reply = QMessageBox.question(self, "Delete Preset",
+                                      f"Delete preset '{name}'?",
+                                      QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self._mgr.delete(name)
+            self._refresh_list()
+            self._status.setText(f"Deleted: {name}")
+
+    # ── export / import ───────────────────────────────────────────────
+
+    def _export(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Presets", "PolyWollyWin_presets.json", "JSON files (*.json)")
+        if path:
+            self._mgr.export_to_file(path)
+            self._status.setText(f"Exported to {Path(path).name}")
+
+    def _import(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Presets", "", "JSON files (*.json)")
+        if path:
+            try:
+                self._mgr.import_from_file(path)
+                self._refresh_list()
+                self._status.setText(f"Imported from {Path(path).name}")
+            except Exception as e:
+                self._status.setText(f"Import failed: {e}")
+
+    def refresh(self):
+        self._refresh_list()
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Control window
 # ─────────────────────────────────────────────────────────────────────
 
@@ -1231,12 +1512,17 @@ class ControlWindow(QWidget):
         # Sequencer tab (needs _param_panel which is built in _effects_tab)
         self._seq_tab = SequencerTab(driver, self._param_panel)
 
+        # Presets tab
+        self._preset_panel = PresetPanel(driver, self._param_panel,
+                                          self._bc, self._settings)
+
         tabs = QTabWidget()
         tabs.addTab(effects_tab_widget, "Effects")
-        tabs.addTab(self._gif_tab,      "GIF / Image")
-        tabs.addTab(self._audio_tab,    "Audio")
-        tabs.addTab(self._paint_tab(),  "Paint")
-        tabs.addTab(self._seq_tab,      "Sequencer")
+        tabs.addTab(self._gif_tab,       "GIF / Image")
+        tabs.addTab(self._audio_tab,     "Audio")
+        tabs.addTab(self._paint_tab(),   "Paint")
+        tabs.addTab(self._seq_tab,       "Sequencer")
+        tabs.addTab(self._preset_panel,  "Presets")
 
         # Footer
         self._debug_label = QLabel()
@@ -1336,6 +1622,14 @@ class ControlWindow(QWidget):
             lambda v: self._driver.set_crossfade_enabled(bool(v))
         )
         xfade_row.addWidget(self._xfade_cb)
+
+        self._screen_react_cb = QCheckBox("Screen react (dim with screen)")
+        self._screen_react_cb.setChecked(False)
+        self._screen_react_cb.setStyleSheet("color:#888; font-size:11px;")
+        self._screen_react_cb.stateChanged.connect(
+            lambda v: self._driver.set_screen_react(bool(v))
+        )
+        xfade_row.addWidget(self._screen_react_cb)
         xfade_row.addStretch()
         layout.addLayout(xfade_row)
 
@@ -1425,20 +1719,11 @@ class ControlWindow(QWidget):
         return w
 
     def _launch_effect(self, name: str):
-        """Click an effect button — starts effect, loads param sliders with saved values."""
+        """Click an effect button — starts effect AND loads its param sliders."""
         self._driver.set_mode_effect(name)
-        saved = (self._settings.get_effect_params(name)
-                 if self._settings.get_persist_enabled() else {})
         for cls in ALL_EFFECTS:
             if cls.name == name:
-                self._param_panel.load(cls, saved_vals=saved)
-                break
-        # Apply saved param values to the live effect instance
-        for cls in ALL_EFFECTS:
-            if cls.name == name:
-                for attr, p in cls.PARAMS.items():
-                    if attr in saved:
-                        self._driver.set_effect_param(attr, saved[attr] / float(p["scale"]))
+                self._param_panel.load(cls)
                 break
 
     def _paint_tab(self) -> QWidget:
@@ -1505,18 +1790,6 @@ class ControlWindow(QWidget):
                 cb.setChecked(n == name)
                 cb.blockSignals(False)
             self._blend_sld.setValue(alpha)
-
-            # Apply saved params to the live Layer B instance (#19)
-            if self._settings.get_persist_enabled():
-                saved = self._settings.get_effect_params(name)
-                for cls in ALL_EFFECTS:
-                    if cls.name == name:
-                        for attr, p in cls.PARAMS.items():
-                            if attr in saved:
-                                self._driver.set_blend_effect_param(
-                                    attr, saved[attr] / float(p["scale"])
-                                )
-                        break
         else:
             self._blend_clear()
 
@@ -1619,15 +1892,9 @@ class ControlWindow(QWidget):
             try:
                 n = mode[7:]
                 self._driver.set_mode_effect(n)
-                saved = self._settings.get_effect_params(n)
                 for cls in ALL_EFFECTS:
                     if cls.name == n:
-                        self._param_panel.load(cls, saved_vals=saved)
-                        for attr, p in cls.PARAMS.items():
-                            if attr in saved:
-                                self._driver.set_effect_param(
-                                    attr, saved[attr] / float(p["scale"])
-                                )
+                        self._param_panel.load(cls)
                         break
             except Exception:
                 pass
@@ -1650,10 +1917,6 @@ class ControlWindow(QWidget):
         effect = self._driver.current_effect_name()
         if mode == "effect" and effect:
             self._settings.set_last_mode(f"effect:{effect}")
-            # Persist the current slider values for this effect (#18)
-            param_vals = self._param_panel.get_values()
-            if param_vals:
-                self._settings.set_effect_params(effect, param_vals)
         else:
             self._settings.set_last_mode(mode)
 
@@ -1712,6 +1975,10 @@ class TrayApp(QSystemTrayIcon):
             act.triggered.connect(lambda _, n=name: driver.set_mode_effect(n))
             fx_menu.addAction(act)
 
+        preset_menu = menu.addMenu("Presets")
+        self._preset_menu = preset_menu
+        self._refresh_preset_menu()
+
         menu.addSeparator()
 
         quit_act = QAction("Quit", menu)
@@ -1720,6 +1987,36 @@ class TrayApp(QSystemTrayIcon):
 
         self.setContextMenu(menu)
         self.activated.connect(self._on_activate)
+
+    def _refresh_preset_menu(self):
+        self._preset_menu.clear()
+        presets = PresetManager().load_all()
+        if not presets:
+            empty = QAction("(no presets saved)", self._preset_menu)
+            empty.setEnabled(False)
+            self._preset_menu.addAction(empty)
+        else:
+            for p in presets:
+                name = p.get("name", "?")
+                act  = QAction(name, self._preset_menu)
+                act.triggered.connect(lambda _, preset=p: self._apply_tray_preset(preset))
+                self._preset_menu.addAction(act)
+
+    def _apply_tray_preset(self, preset: dict):
+        effect = preset.get("effect", "")
+        if effect:
+            self._driver.set_mode_effect(effect)
+        # Params are applied live; the window doesn't need to be open
+        for cls in ALL_EFFECTS:
+            if cls.name == effect:
+                for attr, p_spec in cls.PARAMS.items():
+                    val = preset.get("params", {}).get(attr)
+                    if val is not None:
+                        if p_spec.get("type") == "text":
+                            self._driver.set_effect_param(attr, str(val))
+                        else:
+                            self._driver.set_effect_param(attr, int(val) / float(p_spec["scale"]))
+                break
 
     def _on_activate(self, reason):
         if reason == QSystemTrayIcon.Trigger:

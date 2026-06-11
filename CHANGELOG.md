@@ -1,3 +1,6 @@
+## v2.7.0
+- Knight Industries additions.
+
 ## v2.6.5
 - updating some effects
 

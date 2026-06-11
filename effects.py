@@ -154,7 +154,7 @@ class MatrixRainEffect(BaseEffect):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Matrix Rain V2  —  8 directions (paste before ALL_EFFECTS, then add to it)
+# Matrix Rain V2  —  8 directions 
 # ─────────────────────────────────────────────────────────────────────
 
 class MatrixRainEffectV2(BaseEffect):
@@ -994,6 +994,51 @@ _CLOCK_FONT = {
 # 2-wide colon glyph (bit 1 = left dot column)
 _CLOCK_COLON = [0b00, 0b00, 0b10, 0b00, 0b10, 0b00, 0b00]
 
+# ── Extended glyph set for ScrollTextEffect ──────────────────────────
+# Same 4-wide × 7-tall format.  Lowercase is mapped to uppercase at render time.
+_CLOCK_FONT.update({
+    # ── Letters ──────────────────────────────────────────────────────
+    "A": [0b0110, 0b1001, 0b1001, 0b1111, 0b1001, 0b1001, 0b1001],
+    "B": [0b1110, 0b1001, 0b1001, 0b1110, 0b1001, 0b1001, 0b1110],
+    "C": [0b0110, 0b1000, 0b1000, 0b1000, 0b1000, 0b1000, 0b0110],
+    "D": [0b1110, 0b1001, 0b1001, 0b1001, 0b1001, 0b1001, 0b1110],
+    "E": [0b1111, 0b1000, 0b1000, 0b1110, 0b1000, 0b1000, 0b1111],
+    "F": [0b1111, 0b1000, 0b1000, 0b1110, 0b1000, 0b1000, 0b1000],
+    "G": [0b0110, 0b1000, 0b1000, 0b1011, 0b1001, 0b1001, 0b0110],
+    "H": [0b1001, 0b1001, 0b1001, 0b1111, 0b1001, 0b1001, 0b1001],
+    "I": [0b0110, 0b0010, 0b0010, 0b0010, 0b0010, 0b0010, 0b0110],
+    "J": [0b0011, 0b0001, 0b0001, 0b0001, 0b1001, 0b1001, 0b0110],
+    "K": [0b1001, 0b1010, 0b1100, 0b1000, 0b1100, 0b1010, 0b1001],
+    "L": [0b1000, 0b1000, 0b1000, 0b1000, 0b1000, 0b1000, 0b1111],
+    "M": [0b1001, 0b1101, 0b1011, 0b1001, 0b1001, 0b1001, 0b1001],
+    "N": [0b1001, 0b1101, 0b1011, 0b1001, 0b1001, 0b1001, 0b1001],  # same as M at 4px, acceptable
+    "O": [0b0110, 0b1001, 0b1001, 0b1001, 0b1001, 0b1001, 0b0110],
+    "P": [0b1110, 0b1001, 0b1001, 0b1110, 0b1000, 0b1000, 0b1000],
+    "Q": [0b0110, 0b1001, 0b1001, 0b1001, 0b1011, 0b1010, 0b0111],
+    "R": [0b1110, 0b1001, 0b1001, 0b1110, 0b1100, 0b1010, 0b1001],
+    "S": [0b0111, 0b1000, 0b1000, 0b0110, 0b0001, 0b0001, 0b1110],
+    "T": [0b1111, 0b0100, 0b0100, 0b0100, 0b0100, 0b0100, 0b0100],
+    "U": [0b1001, 0b1001, 0b1001, 0b1001, 0b1001, 0b1001, 0b0110],
+    "V": [0b1001, 0b1001, 0b1001, 0b0110, 0b0110, 0b0010, 0b0010],
+    "W": [0b1001, 0b1001, 0b1001, 0b1001, 0b1111, 0b1011, 0b1101],
+    "X": [0b1001, 0b1001, 0b0110, 0b0100, 0b0110, 0b1001, 0b1001],
+    "Y": [0b1001, 0b1001, 0b0110, 0b0100, 0b0100, 0b0100, 0b0100],
+    "Z": [0b1111, 0b0001, 0b0010, 0b0100, 0b1000, 0b1000, 0b1111],
+    # ── Punctuation ───────────────────────────────────────────────────
+    " ": [0b0000, 0b0000, 0b0000, 0b0000, 0b0000, 0b0000, 0b0000],
+    "!": [0b0100, 0b0100, 0b0100, 0b0100, 0b0100, 0b0000, 0b0100],
+    ".": [0b0000, 0b0000, 0b0000, 0b0000, 0b0000, 0b0000, 0b0100],
+    ",": [0b0000, 0b0000, 0b0000, 0b0000, 0b0000, 0b0100, 0b0010],
+    "-": [0b0000, 0b0000, 0b0000, 0b1110, 0b0000, 0b0000, 0b0000],
+    "_": [0b0000, 0b0000, 0b0000, 0b0000, 0b0000, 0b0000, 0b1111],
+    "?": [0b0110, 0b1001, 0b0001, 0b0010, 0b0100, 0b0000, 0b0100],
+    "*": [0b0000, 0b1010, 0b0100, 0b1110, 0b0100, 0b1010, 0b0000],
+    "#": [0b1010, 0b1111, 0b1010, 0b1010, 0b1111, 0b1010, 0b0000],
+    "/": [0b0001, 0b0001, 0b0010, 0b0100, 0b1000, 0b1000, 0b0000],
+    "<": [0b0010, 0b0100, 0b1000, 0b0100, 0b0010, 0b0001, 0b0000],
+    ">": [0b1000, 0b0100, 0b0010, 0b0100, 0b1000, 0b0000, 0b0000],
+})
+
 
 class ClockEffect(BaseEffect):
     """
@@ -1072,7 +1117,238 @@ class ClockEffect(BaseEffect):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Typing Visualizer
+# Scrolling Text Marquee
+# ─────────────────────────────────────────────────────────────────────
+
+class ScrollTextEffect(BaseEffect):
+    """
+    Scrolls a text message across the display using the 4×7 clock font.
+    Lowercase is automatically uppercased; unknown characters become spaces.
+    The 'message' attr is a plain string — set it live via set_effect_param.
+    """
+    name = "Scroll Text"
+    PARAMS = {
+        "message":  {"label": "Message",  "type": "text",  "default": "POLYWOLLYWIN"},
+        "speed":    {"label": "Speed",    "min": 10, "max": 500, "default": 100, "scale": 100.0},
+        "loop_gap": {"label": "Gap",      "min": 5,  "max": 80,  "default": 20,  "scale": 1.0},
+    }
+
+    _CHAR_W = 4
+    _GAP    = 1
+    _H      = 7
+
+    def __init__(self, message: str = "POLYWOLLYWIN", speed: float = 1.0, loop_gap: int = 20):
+        self.message  = message
+        self.speed    = speed
+        self.loop_gap = loop_gap
+        self._x       = float(COLS)   # current scroll position (pixels, left edge of text)
+        self._row_start = max(0, (ROWS - self._H) // 2 - 1)  # vertically centred, rows 1-7
+
+    def reset(self):
+        self._x = float(COLS)
+
+    def _text_width(self, text: str) -> int:
+        if not text:
+            return 0
+        return len(text) * (self._CHAR_W + self._GAP) - self._GAP
+
+    def tick(self, dt: float) -> list[int]:
+        text = str(self.message).upper()
+        if not text:
+            text = " "
+
+        tw   = self._text_width(text)
+        wrap = tw + int(self.loop_gap)
+
+        self._x -= dt * self.speed * 20.0   # 20 px/s at speed=1.0
+        if self._x < -tw:
+            self._x += wrap + COLS
+
+        frame = np.zeros((ROWS, COLS), dtype=np.uint8)
+        rs    = self._row_start
+
+        for i, ch in enumerate(text):
+            glyph = _CLOCK_FONT.get(ch, _CLOCK_FONT.get(" ", [0] * self._H))
+            char_x_start = int(self._x) + i * (self._CHAR_W + self._GAP)
+            for bi in range(self._CHAR_W):
+                c = char_x_start + bi
+                if c < 0 or c >= COLS:
+                    continue
+                for ri, bits in enumerate(glyph):
+                    r = rs + ri
+                    if 0 <= r < ROWS and (bits >> (self._CHAR_W - 1 - bi)) & 1:
+                        frame[r, c] = 255
+
+        return self._emit(frame)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Keyboard React  (per-key LED flash mapped to keyboard layout)
+# ─────────────────────────────────────────────────────────────────────
+
+# Maps each key character to (matrix_row, matrix_col).
+# Positions chosen so every cell satisfies MASK: col >= row*2.
+#   Numbers  → matrix row 2  (mask: col >= 4)
+#   QWERTY   → matrix row 4  (mask: col >= 8)
+#   ASDF     → matrix row 6  (mask: col >= 12)
+#   ZXCV     → matrix row 8  (mask: col >= 16)
+_KEY_POS: dict[str, tuple[int, int]] = {
+    # Numbers
+    "1": (2,  4), "2": (2,  7), "3": (2, 10), "4": (2, 13),
+    "5": (2, 16), "6": (2, 19), "7": (2, 22), "8": (2, 25),
+    "9": (2, 28), "0": (2, 31),
+    # QWERTY
+    "q": (4,  8), "w": (4, 11), "e": (4, 14), "r": (4, 17),
+    "t": (4, 20), "y": (4, 23), "u": (4, 26), "i": (4, 29),
+    "o": (4, 32), "p": (4, 35),
+    # ASDF
+    "a": (6, 12), "s": (6, 15), "d": (6, 18), "f": (6, 21),
+    "g": (6, 24), "h": (6, 26), "j": (6, 28), "k": (6, 31), "l": (6, 33),
+    # ZXCV
+    "z": (8, 16), "x": (8, 19), "c": (8, 22), "v": (8, 24),
+    "b": (8, 26), "n": (8, 29), "m": (8, 32),
+}
+
+
+class KeyboardReactEffect(BaseEffect):
+    """
+    Each key press lights the LED at that key's approximate physical position
+    on the matrix, then fades out.
+
+    • Normal key  → 180 brightness, 2-pixel glow radius
+    • Capital (Shift held / Caps) → 255 brightness, 4-pixel glow radius, slower decay
+    • Space  → full-width horizontal flash on row 10
+    • Enter  → column burst on the far right
+    • Backspace → column burst on the number-row far right
+
+    Falls back to randomised column flashes (TypingEffect style) if pynput
+    is unavailable.
+    """
+    name = "Keyboard React"
+    PARAMS = {
+        "decay":  {"label": "Decay",   "min": 60, "max": 97, "default": 82, "scale": 100.0},
+        "glow":   {"label": "Glow",    "min": 1,  "max": 6,  "default": 2,  "scale": 1.0},
+    }
+
+    def __init__(self, decay: float = 0.82, glow: int = 2):
+        self.decay = decay
+        self.glow  = glow
+
+        self._buf      = np.zeros((ROWS, COLS), dtype=np.float32)
+        self._lock     = threading.Lock()
+        self._listener = None
+        self._demo     = False
+        self._demo_t   = 0.0
+        self._caps     = False   # track Caps Lock / Shift state
+
+        try:
+            from pynput import keyboard
+            self._listener = keyboard.Listener(
+                on_press=self._on_press,
+                on_release=self._on_release,
+            )
+            self._listener.start()
+        except Exception:
+            self._demo = True
+
+    # ── key handling ──────────────────────────────────────────────────
+
+    def _on_press(self, key):
+        try:
+            from pynput.keyboard import Key
+            # Track shift/caps for brightness decision
+            if key in (Key.shift, Key.shift_r, Key.caps_lock):
+                self._caps = True
+                return
+
+            bri   = 255 if self._caps else 180
+            glow  = int(self.glow) + (2 if self._caps else 0)
+
+            if key == Key.space:
+                self._flash_row(10, 28, bri, glow)
+                return
+            if key == Key.enter:
+                self._flash_col(6, 35, bri, glow)
+                return
+            if key in (Key.backspace,):
+                self._flash_col(2, 34, bri, glow)
+                return
+
+            ch = getattr(key, "char", None)
+            if ch is None:
+                return
+            pos = _KEY_POS.get(ch.lower())
+            if pos:
+                r, c = pos
+                # Uppercase = brighter + wider glow
+                if ch.isupper():
+                    bri  = 255
+                    glow = int(self.glow) + 2
+                self._flash_point(r, c, bri, glow)
+        except Exception:
+            pass
+
+    def _on_release(self, key):
+        try:
+            from pynput.keyboard import Key
+            if key in (Key.shift, Key.shift_r, Key.caps_lock):
+                self._caps = False
+        except Exception:
+            pass
+
+    def _flash_point(self, r: int, c: int, bri: float, radius: int):
+        with self._lock:
+            for dr in range(-radius, radius + 1):
+                for dc in range(-radius * 2, radius * 2 + 1):
+                    rr, cc = r + dr, c + dc
+                    if 0 <= rr < ROWS and 0 <= cc < COLS and MASK_NP[rr, cc]:
+                        dist = math.sqrt(dr ** 2 + (dc * 0.55) ** 2)
+                        b    = bri * max(0.0, 1.0 - dist / max(1.0, radius))
+                        self._buf[rr, cc] = max(self._buf[rr, cc], b)
+
+    def _flash_row(self, r: int, center_c: int, bri: float, radius: int):
+        """Horizontal flash — used for spacebar."""
+        with self._lock:
+            for cc in range(COLS):
+                if MASK_NP[r, cc]:
+                    dist = abs(cc - center_c) / max(1, COLS // 2)
+                    b    = bri * max(0.0, 1.0 - dist)
+                    self._buf[r, cc] = max(self._buf[r, cc], b)
+
+    def _flash_col(self, r: int, c: int, bri: float, radius: int):
+        """Vertical column burst — used for Enter / Backspace."""
+        with self._lock:
+            for rr in range(ROWS):
+                if MASK_NP[rr, c]:
+                    dist = abs(rr - r) / max(1, ROWS)
+                    b    = bri * max(0.0, 1.0 - dist)
+                    self._buf[rr, c] = max(self._buf[rr, c], b)
+
+    def stop(self):
+        if self._listener:
+            try:
+                self._listener.stop()
+            except Exception:
+                pass
+            self._listener = None
+
+    # ── tick ──────────────────────────────────────────────────────────
+
+    def tick(self, dt: float) -> list[int]:
+        if self._demo:
+            self._demo_t += dt
+            if self._demo_t >= 0.22:
+                self._demo_t = 0.0
+                ch = random.choice(list(_KEY_POS.keys()))
+                r, c = _KEY_POS[ch]
+                bri  = random.choice([180, 255])
+                self._flash_point(r, c, bri, int(self.glow))
+
+        with self._lock:
+            self._buf *= max(0.50, min(0.98, float(self.decay)))
+            out = np.clip(self._buf, 0, 255).astype(np.uint8)
+
+        return self._emit(out)
 # ─────────────────────────────────────────────────────────────────────
 
 class TypingEffect(BaseEffect):
@@ -1124,152 +1400,229 @@ class TypingEffect(BaseEffect):
 # ─────────────────────────────────────────────────────────────────────
 
 
+class _SharedAudioCapture:
+    """One shared desktop-audio capture engine for all audio effects.
+
+    Important: PolyWollyWin creates effect objects for previews/UI work. If each
+    object opens Stereo Mix, Realtek/PortAudio can click, reject the device, or
+    return invalid-device errors. This singleton opens the selected input once
+    and every Audio/KITT Audio effect reads the same buffer.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._buf: Optional[np.ndarray] = None
+        self._last_audio_t = 0.0
+        self._samplerate = 44100
+        self._stream = None
+        self._started = False
+        self._failed = False
+        self._mode = "demo"
+        self._debug_last = 0.0
+
+    def log(self, msg: str):
+        line = time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg
+        try:
+            print(line, flush=True)
+        except Exception:
+            pass
+        try:
+            with open("polywolly_audio_debug.log", "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except Exception:
+            pass
+
+    def start(self):
+        if self._started or self._failed:
+            return
+        self._started = True
+
+        try:
+            import os
+            import sounddevice as sd
+        except Exception as e:
+            self._failed = True
+            self._mode = "demo"
+            self.log(f"Audio unavailable, sounddevice import failed: {e!r}")
+            return
+
+        try:
+            devices = list(sd.query_devices())
+        except Exception as e:
+            self._failed = True
+            self._mode = "demo"
+            self.log(f"Audio unavailable, query_devices failed: {e!r}")
+            return
+
+        candidates: list[int] = []
+
+        # Manual override wins. Examples:
+        #   set POLYWOLLY_AUDIO_DEVICE=17
+        #   set POLYWOLLY_AUDIO_DEVICE=Stereo Mix
+        forced = os.environ.get("POLYWOLLY_AUDIO_DEVICE", "").strip()
+        if forced:
+            try:
+                idx = int(forced)
+                if idx not in candidates:
+                    candidates.append(idx)
+            except Exception:
+                needle = forced.lower()
+                for idx, dev in enumerate(devices):
+                    if needle in str(dev.get("name", "")).lower() and idx not in candidates:
+                        candidates.append(idx)
+
+        preferred_names = ("stereo mix", "what u hear", "what you hear", "wave out mix")
+        for idx, dev in enumerate(devices):
+            try:
+                name = str(dev.get("name", "")).lower()
+                max_in = int(dev.get("max_input_channels", 0) or 0)
+                if max_in > 0 and any(x in name for x in preferred_names) and idx not in candidates:
+                    candidates.append(idx)
+            except Exception:
+                pass
+
+        try:
+            default_in = int(sd.default.device[0])
+            if default_in >= 0 and default_in not in candidates:
+                candidates.append(default_in)
+        except Exception:
+            pass
+
+        if not candidates:
+            self._failed = True
+            self._mode = "demo"
+            self.log("Audio unavailable, no input candidates found")
+            return
+
+        last_error = None
+        for idx in candidates:
+            try:
+                if idx < 0 or idx >= len(devices):
+                    self.log(f"Audio skip device {idx}: index outside current device list")
+                    continue
+                dev = devices[idx]
+                name = str(dev.get("name", ""))
+                max_in = int(dev.get("max_input_channels", 0) or 0)
+                if max_in <= 0:
+                    self.log(f"Audio skip device {idx}: no input channels, name={name}")
+                    continue
+
+                channels = max(1, min(2, max_in))
+                # Your working command used 44100 against Stereo Mix, so keep
+                # Stereo Mix at 44100 instead of trusting flaky driver metadata.
+                samplerate = 44100 if "stereo mix" in name.lower() else int(float(dev.get("default_samplerate", 44100) or 44100))
+                blocksize = 2048
+                self._samplerate = samplerate
+
+                def _callback(indata, frames, time_info, status):
+                    try:
+                        data = np.asarray(indata, dtype=np.float32)
+                        if data.ndim == 2:
+                            data = data.mean(axis=1)
+                        else:
+                            data = data.reshape(-1)
+                        data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
+                        rms = float(np.sqrt(np.mean(data * data))) if data.size else 0.0
+                        now = time.monotonic()
+                        with self._lock:
+                            self._buf = data.copy()
+                            if rms > 0.00002:
+                                self._last_audio_t = now
+                            if now - self._debug_last > 2.0:
+                                self._debug_last = now
+                                self.log(f"Audio rms={rms:.6f}, mode={self._mode}")
+                    except Exception as e:
+                        self.log(f"Audio callback error: {e!r}")
+
+                self._stream = sd.InputStream(
+                    device=idx,
+                    channels=channels,
+                    samplerate=samplerate,
+                    blocksize=blocksize,
+                    latency="high",
+                    dtype="float32",
+                    callback=_callback,
+                )
+                self._stream.start()
+                self._mode = "stereo_mix" if "stereo mix" in name.lower() else "input"
+                self.log(f"Audio opened: mode={self._mode}, device={idx}, name={name}, rate={samplerate}, channels={channels}, blocksize={blocksize}")
+                return
+            except Exception as e:
+                last_error = e
+                self.log(f"Audio failed device {idx}: {e!r}")
+                try:
+                    if self._stream is not None:
+                        self._stream.stop()
+                        self._stream.close()
+                except Exception:
+                    pass
+                self._stream = None
+
+        self._failed = True
+        self._mode = "demo"
+        self.log(f"Audio failed, no usable device opened. Last error: {last_error!r}")
+
+    def get(self):
+        self.start()
+        with self._lock:
+            raw = None if self._buf is None else self._buf.copy()
+            last = self._last_audio_t
+            sr = self._samplerate
+            mode = self._mode
+        return raw, last, sr, mode
+
+
+_SHARED_AUDIO_CAPTURE = _SharedAudioCapture()
+
+
 class AudioVisualizer(BaseEffect):
     name = "Audio"
     PARAMS = {
-        "sensitivity": {"label": "Sensitivity", "min": 100, "max": 3000, "default": 900,  "scale": 100.0},
-        "boost":       {"label": "Boost",       "min": 100, "max": 5000, "default": 1800, "scale": 100.0},
-        "falloff":     {"label": "Falloff",     "min": 50,  "max": 98,   "default": 80,   "scale": 100.0},
-        "floor":       {"label": "Noise Floor", "min": 1,   "max": 100,  "default": 8,    "scale": 10000.0},
+        "sensitivity": {"label": "Sensitivity", "min": 100, "max": 3000, "default": 550,  "scale": 100.0},
+        "boost":       {"label": "Boost",       "min": 100, "max": 5000, "default": 850,  "scale": 100.0},
+        "falloff":     {"label": "Falloff",     "min": 50,  "max": 98,   "default": 88,   "scale": 100.0},
+        "floor":       {"label": "Noise Floor", "min": 1,   "max": 100,  "default": 12,   "scale": 10000.0},
     }
 
-    def __init__(self, sensitivity: float = 9.0, boost: float = 18.0,
-                 falloff: float = 0.80, floor: float = 0.0008):
+    def __init__(self, sensitivity: float = 5.5, boost: float = 8.5,
+                 falloff: float = 0.88, floor: float = 0.0012):
         self.sensitivity = sensitivity
         self.boost = boost
         self.falloff = falloff
         self.floor = floor
         self._bars  = np.zeros(COLS, dtype=np.float32)
         self._peaks = np.zeros(COLS, dtype=np.float32)
-        self._stream = None
         self._lock   = threading.Lock()
         self._buf: Optional[np.ndarray] = None
         self._last_audio_t = 0.0
         self._demo_t = 0.0
         self._mode = "demo"
-        self._samplerate = 48000
-        self._agc = 0.05
+        self._samplerate = 44100
+        self._agc = 0.03
+        self._spec_agc = np.full(COLS, 0.02, dtype=np.float32)
 
-        # Draw only on physical LEDs.  The keyboard has a diagonal-cut mask,
-        # so ordinary bottom-up bars disappear on the low-left side.
         self._col_rows = [
             [r for r in range(ROWS - 1, -1, -1) if MASK_NP[r, c]]
             for c in range(COLS)
         ]
 
-        self._open_stream()
-
-    def _open_stream(self):
-        """Prefer Windows WASAPI loopback, fall back to microphone, then demo."""
-        try:
-            import sounddevice as sd
-        except Exception:
-            self._mode = "demo"
-            return
-
-        # Windows system-output capture.
-        try:
-            import sys as _sys
-            if _sys.platform == "win32":
-                devices = sd.query_devices()
-                hostapis = sd.query_hostapis()
-                candidates: list[int] = []
-                try:
-                    default_out = sd.default.device[1]
-                    if default_out is not None and int(default_out) >= 0:
-                        candidates.append(int(default_out))
-                except Exception:
-                    pass
-
-                for idx, dev in enumerate(devices):
-                    try:
-                        host_name = hostapis[dev["hostapi"]].get("name", "")
-                        if "WASAPI" in host_name.upper() and int(dev.get("max_output_channels", 0) or 0) > 0:
-                            if idx not in candidates:
-                                candidates.append(idx)
-                    except Exception:
-                        pass
-
-                for idx in candidates:
-                    try:
-                        dev = devices[idx]
-                        host_name = hostapis[dev["hostapi"]].get("name", "")
-                        if "WASAPI" not in host_name.upper():
-                            continue
-                        channels = max(1, min(2, int(dev.get("max_output_channels", 2) or 2)))
-                        samplerate = int(dev.get("default_samplerate", 48000) or 48000)
-                        extra = sd.WasapiSettings(loopback=True)
-                        self._samplerate = samplerate
-                        self._stream = sd.InputStream(
-                            device=idx,
-                            channels=channels,
-                            samplerate=samplerate,
-                            blocksize=2048,
-                            dtype="float32",
-                            extra_settings=extra,
-                            callback=self._audio_cb,
-                        )
-                        self._stream.start()
-                        self._mode = "loopback"
-                        return
-                    except Exception:
-                        self._stream = None
-        except Exception:
-            self._stream = None
-
-        # Mic/input fallback.
-        try:
-            self._samplerate = 44100
-            self._stream = sd.InputStream(
-                channels=1,
-                samplerate=self._samplerate,
-                blocksize=2048,
-                dtype="float32",
-                callback=self._audio_cb,
-            )
-            self._stream.start()
-            self._mode = "input"
-            return
-        except Exception:
-            self._stream = None
-            self._mode = "demo"
-
-    def _audio_cb(self, indata, frames, time_info, status):
-        try:
-            data = np.asarray(indata, dtype=np.float32)
-            if data.ndim == 2:
-                data = data.mean(axis=1)
-            else:
-                data = data.reshape(-1)
-            data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
-            with self._lock:
-                self._buf = data.copy()
-                if float(np.sqrt(np.mean(data * data))) > max(0.00002, self.floor * 0.35):
-                    self._last_audio_t = time.monotonic()
-        except Exception:
-            pass
-
     def stop(self):
-        if self._stream:
-            try:
-                self._stream.stop()
-                self._stream.close()
-            except Exception:
-                pass
-            self._stream = None
+        pass
 
     def _paint_bar(self, frame: np.ndarray, col: int, height: float, peak: float = 0.0):
         rows = self._col_rows[col]
         if not rows:
             return
+
         h = int(round(max(0.0, min(float(len(rows)), height))))
         for i, r in enumerate(rows[:h]):
-            bri = int(110 + 145 * (1.0 - i / max(1, len(rows))))
+            # Dimmer than before, so tiny spectral movement does not look maxed out.
+            bri = int(65 + 150 * (1.0 - i / max(1, len(rows))))
             frame[r, col] = max(frame[r, col], bri)
 
         pr = int(round(max(0.0, min(float(len(rows) - 1), peak))))
-        if 0 <= pr < len(rows):
-            frame[rows[pr], col] = max(frame[rows[pr], col], 235)
+        if 0 <= pr < len(rows) and height > 0.25:
+            frame[rows[pr], col] = max(frame[rows[pr], col], 225)
 
     def _demo_frame(self, dt: float) -> list[int]:
         self._demo_t += dt
@@ -1278,17 +1631,18 @@ class AudioVisualizer(BaseEffect):
             rows = self._col_rows[c]
             if not rows:
                 continue
-            wave = math.sin(self._demo_t * 4.0 + c * 0.36) * 0.5 + 0.5
-            pulse = math.sin(self._demo_t * 1.7 + c * 0.11) * 0.5 + 0.5
-            h = 1 + wave * max(1, len(rows) - 1) * (0.35 + pulse * 0.55)
+            wave = math.sin(self._demo_t * 3.0 + c * 0.30) * 0.5 + 0.5
+            h = 1 + wave * max(1, len(rows) - 1) * 0.45
             self._paint_bar(frame, c, h)
         return self._emit(frame)
 
     def tick(self, dt: float) -> list[int]:
-        with self._lock:
-            raw = None if self._buf is None else self._buf.copy()
+        raw, last_audio_t, samplerate, mode = _SHARED_AUDIO_CAPTURE.get()
+        self._last_audio_t = last_audio_t
+        self._samplerate = samplerate
+        self._mode = mode
 
-        if raw is None or len(raw) < 64:
+        if raw is None or len(raw) < 128:
             return self._demo_frame(dt)
 
         raw = np.nan_to_num(raw.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
@@ -1297,12 +1651,16 @@ class AudioVisualizer(BaseEffect):
         floor = max(0.00001, float(self.floor))
 
         if rms < floor and (time.monotonic() - self._last_audio_t) > 0.50:
-            return self._demo_frame(dt)
+            decay = max(0.50, min(0.98, float(self.falloff)))
+            self._bars *= decay
+            self._peaks *= 0.94
+            frame = np.zeros((ROWS, COLS), dtype=np.uint8)
+            for c in range(COLS):
+                self._paint_bar(frame, c, self._bars[c], self._peaks[c])
+            return self._emit(frame)
 
-        # Normalize gently, not accurately.  This is a keyboard visualizer,
-        # not a meter.  It must move visibly at normal desktop volume.
         active = max(0.0, rms - floor)
-        self._agc = max(self._agc * 0.96, active * 6.0, 0.003)
+        self._agc = max(self._agc * 0.985, active * 3.0, 0.006)
         norm = np.clip(raw / self._agc, -1.0, 1.0)
 
         window = np.hanning(len(norm)).astype(np.float32)
@@ -1311,27 +1669,29 @@ class AudioVisualizer(BaseEffect):
         if len(fft) < 16:
             return self._demo_frame(dt)
 
-        fft[:2] = 0
-        low = 45.0
-        high = min(16000.0, self._samplerate / 2.0)
+        fft[:3] = 0
+
+        # Deliberately skip sub-bass. The old version added bass back into
+        # every column, which made the whole matrix look full all the time.
+        low = 180.0
+        high = min(12000.0, self._samplerate / 2.0)
         edges = np.geomspace(low, high, COLS + 1)
+
         vals = np.zeros(COLS, dtype=np.float32)
         for c in range(COLS):
             mask = (freqs >= edges[c]) & (freqs < edges[c + 1])
             if np.any(mask):
-                vals[c] = float(np.mean(fft[mask]))
+                vals[c] = float(np.sqrt(np.mean(fft[mask] * fft[mask])))
 
-        # Bass kick raises the whole display slightly so beats feel like hits.
-        bass_mask = (freqs >= 45) & (freqs <= 180)
-        bass = float(np.mean(fft[bass_mask])) if np.any(bass_mask) else 0.0
+        self._spec_agc = np.maximum(self._spec_agc * 0.992, vals * 2.5 + 0.0005)
+        vals = vals / np.maximum(self._spec_agc, 0.0005)
+        vals = vals * max(0.1, self.boost) * max(0.1, self.sensitivity) * 0.018
+        vals = np.clip(np.log1p(vals * 1.8) / 1.8, 0.0, 1.0)
 
-        vals = np.log1p(vals * max(0.1, self.boost) * max(0.1, self.sensitivity))
-        vals += math.log1p(bass * max(0.1, self.boost) * 0.25)
-        mx = float(np.percentile(vals, 92)) if np.any(vals) else 0.0
-        if mx <= 0.0001:
-            return self._demo_frame(dt)
-        vals = np.clip(vals / mx, 0.0, 1.0)
-        vals = vals ** 0.55
+        # Gate tiny changes. This keeps the top few rows from flickering from
+        # microscopic noise.
+        vals[vals < 0.08] = 0.0
+        vals = vals ** 1.35
 
         frame = np.zeros((ROWS, COLS), dtype=np.uint8)
         decay = max(0.50, min(0.98, float(self.falloff)))
@@ -1339,13 +1699,12 @@ class AudioVisualizer(BaseEffect):
             rows = self._col_rows[c]
             if not rows:
                 continue
-            target_h = val * len(rows)
+            target_h = val * len(rows) * 0.86
             self._bars[c] = max(self._bars[c] * decay, target_h)
-            self._peaks[c] = max(self._peaks[c] * 0.955, self._bars[c])
+            self._peaks[c] = max(self._peaks[c] * 0.945, self._bars[c])
             self._paint_bar(frame, c, self._bars[c], self._peaks[c])
 
         return self._emit(frame)
-
 
 # ─────────────────────────────────────────────────────────────────────
 # Fire  (demoscene cellular-automaton flame)
@@ -1785,76 +2144,411 @@ class ChaseEffect(BaseEffect):
 
 class KITTAudioEffect(AudioVisualizer):
     """
-    Audio-reactive Knight Rider scanner.
+    KITT/KARR discrete dot-fade voice display.
 
-    Inherits the WASAPI loopback / mic capture from AudioVisualizer.
-    The scanner always bounces; audio level drives its speed (quiet = slow
-    idle sweep, loud = fast frantic bounce) and peak brightness.
-    Falls back to a gentle idle sweep when no audio is detected.
+    Shared behavior:
+    - no sound = off
+    - voice/high-mid driven, not bass driven
+    - Sensitivity/Boost are fine-tuning trims over a stronger fixed base gain
+    - fixed bar width = 3
+    - fixed falloff = 0.70
+    - no Noise Floor slider
+    - LEDs fade per-dot with a slower stepped trail
+
+    Style 0 = KITT
+    - first sound lights the middle band on all three bars
+    - center bar grows from middle outward
+    - side bars respond at the same time, capped two levels below center
+
+    Style 1 = KARR
+    - center bar still grows from the middle band outward, same as KITT
+    - side bars start at the top/bottom edges and grow inward toward center
+    - same timing and dot-fade behavior as KITT
     """
     name = "KITT Audio"
     PARAMS = {
-        "sensitivity": {"label": "Sensitivity", "min": 100, "max": 3000, "default": 900,  "scale": 100.0},
-        "boost":       {"label": "Boost",       "min": 100, "max": 5000, "default": 1800, "scale": 100.0},
-        "width":       {"label": "Width",       "min": 2,   "max": 15,   "default": 6,    "scale": 1.0},
-        "rows":        {"label": "Rows",        "min": 1,   "max": 6,    "default": 4,    "scale": 1.0},
+        "style":       {"label": "Style 0=KITT 1=KARR", "min": 0,    "max": 1,    "default": 0,   "scale": 1.0},
+        "sensitivity": {"label": "Sensitivity Trim",    "min": 50,   "max": 150,  "default": 100, "scale": 100.0},
+        "boost":       {"label": "Boost Trim",          "min": 50,   "max": 150,  "default": 100, "scale": 100.0},
+        "x_pos":       {"label": "X Position",          "min": 0,    "max": 100,  "default": 66,  "scale": 1.0},
+        "y_pos":       {"label": "Y Position",          "min": 0,    "max": 100,  "default": 45,  "scale": 1.0},
     }
 
-    def __init__(self, sensitivity: float = 9.0, boost: float = 18.0,
-                 width: int = 6, rows: int = 4,
-                 falloff: float = 0.80, floor: float = 0.0008):
+    def __init__(self, style: float = 0.0, sensitivity: float = 1.0, boost: float = 1.0,
+                 x_pos: float = 66.0, y_pos: float = 45.0):
         super().__init__(sensitivity=sensitivity, boost=boost,
-                         falloff=falloff, floor=floor)
-        self.width       = width
-        self.rows        = rows
-        self._scan_pos   = 0.0
-        self._scan_dir   = 1.0
-        self._scan_buf   = np.zeros((ROWS, COLS), dtype=np.float32)
+                         falloff=0.70, floor=0.0)
+        self.style = style
+        self.x_pos = x_pos
+        self.y_pos = y_pos
 
-    def _audio_level(self) -> float:
-        """Return 0-1 RMS level from the shared audio buffer."""
-        with self._lock:
-            raw = None if self._buf is None else self._buf.copy()
-        if raw is None or len(raw) < 8:
-            return 0.0
-        raw = np.nan_to_num(raw.astype(np.float32))
+        # Locked values.
+        self.width = 3.0
+        self.falloff = 0.70
+        self.floor = 0.0
+
+        # Strong internal gain. UI sliders now trim around this.
+        self._base_sensitivity = 17.5
+        self._base_boost = 50.0
+
+        self._vu_agc = 0.025
+        self._smooth_level = 0.0
+        self._kitt_debug_last = 0.0
+        self._geom_key = None
+        self._groups = [[], [], []]
+
+        # 0 off, 64 = 25%, 128 = 50%, 230 = on
+        self._dot_state = np.zeros((ROWS, COLS), dtype=np.uint8)
+
+    def _current_style(self) -> int:
+        return 1 if int(round(float(getattr(self, "style", 0.0)))) >= 1 else 0
+
+    def _style_name(self) -> str:
+        return "KARR" if self._current_style() == 1 else "KITT"
+
+    def _visual_mid_row(self) -> int:
+        y = np.clip(float(getattr(self, "y_pos", 50.0)), 0.0, 100.0) / 100.0
+        return int(round(y * (ROWS - 1)))
+
+    def _rebuild_geometry_if_needed(self):
+        bar_w = 3
+        style = self._current_style()
+
+        key = (
+            int(round(float(self.x_pos))),
+            int(round(float(getattr(self, "y_pos", 50.0)))),
+            bar_w,
+            style,
+            ROWS,
+            COLS,
+        )
+        if key == self._geom_key:
+            return
+        self._geom_key = key
+
+        x = np.clip(float(self.x_pos), 0.0, 100.0) / 100.0
+        center = int(round(x * (COLS - 1)))
+
+        # Keep the locked width/spacing logic from the tuned KITT version.
+        spread = max(bar_w + 3, int(round(COLS * (0.16 if style == 1 else 0.15))))
+        positions = [
+            center - spread,
+            center,
+            center + spread,
+        ]
+
+        self._groups = []
+        for pos in positions:
+            c0 = max(0, int(pos) - bar_w // 2)
+            c1 = min(COLS, c0 + bar_w)
+            if c1 - c0 < bar_w:
+                c0 = max(0, c1 - bar_w)
+            cols = [c for c in range(c0, c1) if np.any(MASK_NP[:, c])]
+            self._groups.append(cols)
+
+    def _voice_high_level(self):
+        raw, last_audio_t, samplerate, mode = _SHARED_AUDIO_CAPTURE.get()
+        self._last_audio_t = last_audio_t
+        self._samplerate = samplerate
+        self._mode = mode
+
+        if raw is None or len(raw) < 256:
+            return 0.0, 0.0, 0.0, mode
+
+        raw = np.nan_to_num(raw.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
         raw -= float(np.mean(raw))
-        rms = float(np.sqrt(np.mean(raw * raw)))
-        return float(np.clip(rms * float(self.sensitivity) * 3.0, 0.0, 1.0))
+        full_rms = float(np.sqrt(np.mean(raw * raw)))
+
+        window = np.hanning(len(raw)).astype(np.float32)
+        fft = np.abs(np.fft.rfft(raw * window))
+        freqs = np.fft.rfftfreq(len(raw), d=1.0 / max(8000, samplerate))
+        if len(fft) < 16:
+            return 0.0, full_rms, 0.0, mode
+
+        def band_energy(lo, hi):
+            hi = min(float(hi), samplerate / 2.0)
+            mask = (freqs >= float(lo)) & (freqs < hi)
+            if not np.any(mask):
+                return 0.0
+            vals = fft[mask]
+            return float(np.sqrt(np.mean(vals * vals)))
+
+        low_voice = band_energy(300, 1200)
+        presence = band_energy(1200, 4200)
+        highs = band_energy(4200, 9000)
+        bass = band_energy(45, 220)
+
+        voice = low_voice * 0.25 + presence * 1.00 + highs * 0.70
+        voice = max(0.0, voice - bass * 0.34)
+
+        if voice < 0.00001:
+            return 0.0, full_rms, voice, mode
+
+        self._vu_agc = max(self._vu_agc * 0.993, voice * 2.35, 0.0005)
+        norm = voice / max(self._vu_agc, 0.0005)
+
+        sensitivity_trim = max(0.5, min(1.5, float(getattr(self, "sensitivity", 1.0))))
+        boost_trim = max(0.5, min(1.5, float(getattr(self, "boost", 1.0))))
+
+        effective_sensitivity = self._base_sensitivity * sensitivity_trim
+        effective_boost = self._base_boost * boost_trim
+
+        level = norm * effective_sensitivity * effective_boost * 0.0056
+        level = np.log1p(level * 1.35) / 1.72
+        level = float(np.clip(level, 0.0, 1.0))
+
+        if level < 0.070:
+            level = 0.0
+        else:
+            level = ((level - 0.070) / 0.930) ** 1.18
+
+        return float(np.clip(level, 0.0, 1.0)), full_rms, voice, mode
+
+    def _quantize_level(self, level: float) -> int:
+        if level <= 0.0:
+            return 0
+        thresholds = [0.10, 0.23, 0.37, 0.54, 0.73, 0.91]
+        out = 0
+        for t in thresholds:
+            if level >= t:
+                out += 1
+        return max(0, min(6, out))
+
+    def _valid_rows_for_group(self, group_index: int):
+        cols = self._groups[group_index]
+        if not cols:
+            return []
+        return [r for r in range(ROWS) if any(MASK_NP[r, c] for c in cols)]
+
+    def _row_order_kitt(self, group_index: int):
+        valid = self._valid_rows_for_group(group_index)
+        if not valid:
+            return []
+
+        mid = self._visual_mid_row()
+        rows = []
+        for r in [mid - 1, mid, mid + 1]:
+            if r in valid and r not in rows:
+                rows.append(r)
+
+        for step in range(2, ROWS + 1):
+            above = mid - step
+            below = mid + step
+            if above in valid and above not in rows:
+                rows.append(above)
+            if below in valid and below not in rows:
+                rows.append(below)
+        return rows
+
+    def _row_order_karr_center(self):
+        # Keep the center column KARR response close to KITT, so the style shift
+        # mainly comes from the bracketed side bars.
+        return self._row_order_kitt(1)
+
+    def _row_order_karr_side(self, group_index: int):
+        """
+        KARR side bars are the inverse of the center bar.
+
+        Think of the vertical center as 0:
+          +6 = top edge
+          -6 = bottom edge
+
+        Side bars:
+          - upper side stack starts at the top edge and grows downward
+          - lower side stack starts at the bottom edge and grows upward
+          - both grow together toward center
+          - max stops one row away from center, leaving the center gap clear
+        """
+        valid = self._valid_rows_for_group(group_index)
+        if not valid:
+            return []
+
+        mid = self._visual_mid_row()
+
+        # Leave a clear center gap around the KITT/KARR mouth center.
+        upper_limit = max(0, mid - 1)
+        lower_limit = min(ROWS - 1, mid + 1)
+
+        top_rows = [r for r in valid if r <= upper_limit]
+        bottom_rows = [r for r in valid if r >= lower_limit]
+
+        # Top grows down from physical top toward center.
+        top_rows.sort()
+
+        # Bottom grows up from physical bottom toward center.
+        bottom_rows.sort(reverse=True)
+
+        rows = []
+        max_len = max(len(top_rows), len(bottom_rows))
+        for i in range(max_len):
+            if i < len(top_rows):
+                rows.append(top_rows[i])
+            if i < len(bottom_rows):
+                rows.append(bottom_rows[i])
+
+        return rows
+
+    def _rows_for_level_kitt(self, group_index: int, level: int):
+        if level <= 0:
+            return []
+        order = self._row_order_kitt(group_index)
+        if not order:
+            return []
+        if level >= 6:
+            count = len(order)
+        else:
+            count = min(len(order), 3 + (level - 1) * 2)
+        return order[:count]
+
+    def _rows_for_level_karr(self, group_index: int, level: int):
+        if level <= 0:
+            return []
+
+        if group_index == 1:
+            order = self._row_order_karr_center()
+            if not order:
+                return []
+            if level >= 6:
+                count = len(order)
+            else:
+                count = min(len(order), 3 + (level - 1) * 2)
+            return order[:count]
+
+        # Side brackets: level 1 starts at the top and bottom edges.
+        # Higher levels grow inward toward the center. Level 6 reaches one row
+        # away from center.
+        order = self._row_order_karr_side(group_index)
+        if not order:
+            return []
+
+        if level >= 6:
+            count = len(order)
+        else:
+            # Use proportional growth so low levels are edge-only, high levels
+            # approach the center gap.
+            count = max(2, int(round((level / 6.0) * len(order))))
+            count = min(len(order), count)
+
+        return order[:count]
+
+    def _rows_for_level(self, group_index: int, level: int):
+        if self._current_style() == 1:
+            return self._rows_for_level_karr(group_index, level)
+        return self._rows_for_level_kitt(group_index, level)
+
+    def _paint_target_rows(self, target: np.ndarray, group_index: int, level: int):
+        cols = self._groups[group_index]
+        rows = self._rows_for_level(group_index, level)
+        if not cols or not rows:
+            return
+
+        mid = self._visual_mid_row()
+        style = self._current_style()
+
+        for r in rows:
+            dist = abs(r - mid)
+            if style == 1:
+                bri = max(150, 225 - dist * 6)
+            else:
+                bri = max(145, 230 - dist * 7)
+            for c in cols:
+                if MASK_NP[r, c]:
+                    target[r, c] = max(target[r, c], int(bri))
+
+    def _apply_dot_fade(self, target: np.ndarray):
+        """
+        Slower dot-by-dot fade for both KITT and KARR.
+
+        Old fade was:
+          100% -> 50% -> 25% -> off
+
+        That was too sharp. This version adds intermediate steps:
+          100% -> 75% -> 50% -> 37% -> 25% -> 12% -> off
+        """
+        new_state = self._dot_state.copy()
+
+        on = target > 0
+        new_state[on] = target[on].astype(np.uint8)
+
+        off = ~on
+        old = self._dot_state
+
+        # Full-ish to 75%
+        mask = off & (old > 180)
+        new_state[mask] = 180
+
+        # 75% to 50%
+        mask = off & (old <= 180) & (old > 128)
+        new_state[mask] = 128
+
+        # 50% to 37%
+        mask = off & (old <= 128) & (old > 96)
+        new_state[mask] = 96
+
+        # 37% to 25%
+        mask = off & (old <= 96) & (old > 64)
+        new_state[mask] = 64
+
+        # 25% to 12%
+        mask = off & (old <= 64) & (old > 32)
+        new_state[mask] = 32
+
+        # 12% to off
+        mask = off & (old <= 32)
+        new_state[mask] = 0
+
+        self._dot_state = new_state
 
     def tick(self, dt: float) -> list[int]:
-        level = self._audio_level()
+        self._rebuild_geometry_if_needed()
 
-        # Speed: quiet → 5 cols/s idle sweep; loud → 45 cols/s frantic
-        speed = 5.0 + level * 40.0
-        self._scan_pos += self._scan_dir * speed * dt
-        if self._scan_pos >= COLS - 1:
-            self._scan_pos = float(COLS - 1)
-            self._scan_dir = -1.0
-        elif self._scan_pos <= 0:
-            self._scan_pos = 0.0
-            self._scan_dir = 1.0
+        level, rms, voice, mode = self._voice_high_level()
 
-        # Brightness: minimum 8% idle glow, full 100% at peak volume
-        bri_scale = 0.08 + level * 0.92
+        if level > self._smooth_level:
+            self._smooth_level += (level - self._smooth_level) * 0.62
+        else:
+            self._smooth_level *= 0.76
 
-        self._scan_buf *= 0.78
+        center_level = self._quantize_level(self._smooth_level)
 
-        n   = max(1, int(self.rows))
-        mid = ROWS // 2
-        r0  = max(0, mid - n // 2)
-        r1  = min(ROWS, r0 + n)
-        w   = max(1.0, float(self.width))
+        if level <= 0.0 and self._smooth_level < 0.075:
+            center_level = 0
+            self._smooth_level = 0.0
 
-        for c in range(COLS):
-            dist = abs(c - self._scan_pos)
-            if dist < w * 2.5:
-                bri = 255.0 * bri_scale * max(0.0, 1.0 - (dist / w) ** 1.5)
-                for r in range(r0, r1):
-                    self._scan_buf[r, c] = max(self._scan_buf[r, c], bri)
+        if self._current_style() == 1:
+            # KARR sides use the same master response as the center, but draw
+            # from the outer edges inward.
+            side_level = center_level
+        else:
+            # KITT sides move in sync but cap two levels below center.
+            if center_level <= 1:
+                side_level = center_level
+            else:
+                side_level = min(center_level, max(1, center_level - 2))
 
-        return self._emit(np.clip(self._scan_buf, 0, 255).astype(np.uint8))
+        target = np.zeros((ROWS, COLS), dtype=np.uint8)
 
+        self._paint_target_rows(target, 0, side_level)
+        self._paint_target_rows(target, 1, center_level)
+        self._paint_target_rows(target, 2, side_level)
+
+        self._apply_dot_fade(target)
+
+        try:
+            now = time.monotonic()
+            if now - self._kitt_debug_last > 2.0:
+                self._kitt_debug_last = now
+                _SHARED_AUDIO_CAPTURE.log(
+                    f"{self._style_name()} locked level={center_level}, side={side_level}, "
+                    f"smooth={self._smooth_level:.3f}, rms={rms:.6f}, "
+                    f"voice={voice:.6f}, sens_trim={self.sensitivity:.2f}, "
+                    f"boost_trim={self.boost:.2f}, x={self.x_pos:.1f}, "
+                    f"y={self.y_pos:.1f}, fixed_bar_width=3, mode={mode}"
+                )
+        except Exception:
+            pass
+
+        return self._emit(self._dot_state.astype(np.uint8))
 
 # ═════════════════════════════════════════════════════════════════════
 # Registry
@@ -1881,13 +2575,15 @@ ALL_EFFECTS: list[type[BaseEffect]] = [
     WaveEffect,
     SnakeEffect,
     ClockEffect,
+    ScrollTextEffect,
 #    TypingEffect,
+    KeyboardReactEffect,
 #    AudioVisualizer,  # moved to dedicated Audio tab
     FireEffect,
     MetaballsEffect,
 #    GameOfLifeEffect,
     ChaseEffect,
-#   KITTAudioEffect,  # enable in Audio tab or uncomment to show in Effects list
+   KITTAudioEffect,  # enable in Audio tab or uncomment to show in Effects list
 ]
 
 EFFECT_NAMES: list[str] = [e.name for e in ALL_EFFECTS]
