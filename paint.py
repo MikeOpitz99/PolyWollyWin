@@ -13,9 +13,15 @@ from PySide6.QtWidgets import (
 )
 from renderer import ROWS, COLS, MASK_NP, logical_to_physical, apply_mask, blank_frame
 
-CELL_W = 14
-CELL_H = 20
+CELL_W = 12
+CELL_H = 12
 GAP    = 2
+_HALF  = 6
+
+
+def _col_y_offset(c: int) -> int:
+    """Vertical stagger for physical-looking paint canvas."""
+    return _HALF if (c % 2 == 1) else 0
 
 # Brightness palette swatches (label, value, display color)
 PALETTE = [
@@ -65,7 +71,7 @@ class PaintCanvas(QWidget):
         self._contrast = 1.0
 
         w = COLS * (CELL_W + GAP) + GAP
-        h = ROWS * (CELL_H + GAP) + GAP
+        h = ROWS * (CELL_H + GAP) + GAP + _HALF
         self.setFixedSize(w, h)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
@@ -108,10 +114,27 @@ class PaintCanvas(QWidget):
         self.frame_changed.emit(self.get_physical())
 
     def _cell_at(self, pos: QPoint) -> tuple[int, int] | None:
-        c = pos.x() // (CELL_W + GAP)
-        r = pos.y() // (CELL_H + GAP)
-        if 0 <= r < ROWS and 0 <= c < COLS and MASK_NP[r, c]:
-            return r, c
+        pitch_x = CELL_W + GAP
+        pitch_y = CELL_H + GAP
+
+        c = (pos.x() - GAP) // pitch_x
+        if not (0 <= c < COLS):
+            return None
+
+        y_adj = pos.y() - GAP - _col_y_offset(c)
+        r = y_adj // pitch_y
+        if not (0 <= r < ROWS):
+            return None
+
+        # Keep clicks close to the LED body. This avoids painting when the
+        # pointer is inside the stagger padding or large gap area.
+        local_x = (pos.x() - GAP) - (c * pitch_x)
+        local_y = y_adj - (r * pitch_y)
+        if not (0 <= local_x <= CELL_W and 0 <= local_y <= CELL_H):
+            return None
+
+        if MASK_NP[r, c]:
+            return int(r), int(c)
         return None
 
     def _paint_at(self, pos: QPoint):
@@ -134,16 +157,20 @@ class PaintCanvas(QWidget):
 
     def paintEvent(self, _event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.setRenderHint(QPainter.Antialiasing, True)
         painter.fillRect(self.rect(), QColor(14, 14, 14))
 
         for r in range(ROWS):
             for c in range(COLS):
                 x = c * (CELL_W + GAP) + GAP
-                y = r * (CELL_H + GAP) + GAP
+                y = r * (CELL_H + GAP) + GAP + _col_y_offset(c)
+
                 if not MASK_NP[r, c]:
-                    painter.fillRect(x, y, CELL_W, CELL_H, QColor(8, 8, 8))
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(QColor(8, 8, 8))
+                    painter.drawEllipse(x, y, CELL_W, CELL_H)
                     continue
+
                 v = int(self._frame[r, c])
                 if v == 0:
                     color = QColor(22, 22, 22)
@@ -153,9 +180,10 @@ class PaintCanvas(QWidget):
                     g_ch = int(v * 0.44)
                     b_ch = 0
                     color = QColor(r_ch, g_ch, b_ch)
-                painter.fillRect(x, y, CELL_W, CELL_H, color)
+
                 painter.setPen(QPen(QColor(38, 38, 38), 1))
-                painter.drawRect(x, y, CELL_W - 1, CELL_H - 1)
+                painter.setBrush(color)
+                painter.drawEllipse(x, y, CELL_W, CELL_H)
 
 
 class PaintEditor(QWidget):
