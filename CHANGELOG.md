@@ -1,3 +1,6 @@
+## v2.9
+- adding minimize to tray function on boot
+
 ## v2.8.5
 - Fix preview and paint column offset
 
