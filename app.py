@@ -24,12 +24,12 @@ import time
 import json
 import threading
 from pathlib import Path
-from urllib.request import urlopen
 
 import numpy as np
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QObject, QSettings
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction, QDesktopServices
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction, QDesktopServices, QMovie
 from PySide6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu,
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QFrame, QTabWidget, QScrollArea, QSizePolicy,
     QGroupBox, QCheckBox, QMessageBox, QListWidget,
     QComboBox, QDoubleSpinBox, QLineEdit, QInputDialog,
+    QProgressBar,
 )
 
 from version import VERSION
@@ -125,6 +126,132 @@ class PresetManager:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Startup splash
+# ─────────────────────────────────────────────────────────────────────
+
+class StartupSplash(QWidget):
+    """Simple startup splash with logo and fake progress."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.SplashScreen | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        self.setObjectName("StartupSplash")
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        card = QFrame()
+        card.setStyleSheet("""
+            QFrame {
+                background: #101010;
+                border: 1px solid #2a2a2a;
+                border-radius: 16px;
+            }
+            QLabel#SplashTitle {
+                color: #f2f2f2;
+                font-size: 20px;
+                font-weight: 700;
+            }
+            QLabel#SplashSubtitle {
+                color: #999;
+                font-size: 11px;
+            }
+            QProgressBar {
+                min-height: 14px;
+                max-height: 14px;
+                border: 1px solid #2a2a2a;
+                border-radius: 7px;
+                background: #171717;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background: #e8001d;
+                border-radius: 6px;
+            }
+        """)
+        outer.addWidget(card)
+
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(28, 24, 28, 24)
+        lay.setSpacing(12)
+
+        self.logo = QLabel()
+        self.logo.setAlignment(Qt.AlignCenter)
+        self.logo.setFixedSize(273, 204)
+
+        self._movie = None
+        movie_path = _resource_path("assets/pwwAnim.gif")
+        if movie_path.exists():
+            movie = QMovie(str(movie_path))
+            if movie.isValid():
+                movie.setScaledSize(self.logo.size())
+                self.logo.setMovie(movie)
+                self._movie = movie
+                movie.start()
+
+        # Static fallback only if the GIF is unavailable or invalid.
+        if self._movie is None:
+            logo_path = _resource_path("assets/pww.png")
+            if logo_path.exists():
+                pm = QPixmap(str(logo_path))
+                if not pm.isNull():
+                    self.logo.setPixmap(
+                        pm.scaled(
+                            self.logo.size(),
+                            Qt.KeepAspectRatio,
+                            Qt.SmoothTransformation,
+                        )
+                    )
+
+        lay.addWidget(self.logo, 0, Qt.AlignCenter)
+
+        self.title = QLabel("Starting PolyWollyWin")
+        self.title.setObjectName("SplashTitle")
+        self.title.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.title)
+
+        self.subtitle = QLabel("Initializing...")
+        self.subtitle.setObjectName("SplashSubtitle")
+        self.subtitle.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.subtitle)
+
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 100)
+        self.bar.setTextVisible(False)
+        self.bar.setValue(0)
+        lay.addWidget(self.bar)
+
+        self.resize(380, 370)
+
+    def center_on_screen(self):
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        geo = screen.availableGeometry()
+        self.move(
+            geo.left() + (geo.width() - self.width()) // 2,
+            geo.top() + (geo.height() - self.height()) // 2,
+        )
+
+    def set_status(self, text: str, value: int):
+        self.subtitle.setText(text)
+        self.bar.setValue(max(0, min(100, int(value))))
+        QApplication.processEvents()
+
+    def finish_later(self, ms: int = 250):
+        self.bar.setValue(100)
+        QApplication.processEvents()
+        QTimer.singleShot(ms, self._finish)
+
+    def _finish(self):
+        if self._movie is not None:
+            self._movie.stop()
+        self.close()
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Settings persistence
 # ─────────────────────────────────────────────────────────────────────
 
@@ -184,21 +311,35 @@ class Settings:
 # Helpers
 # ─────────────────────────────────────────────────────────────────────
 
-def _make_icon(color="#e8001d") -> QIcon:
-    """Load assets/pww.ico if available, fall back to drawn icon."""
-    ico_path = Path("assets/pww.ico")
-    if ico_path.exists():
-        return QIcon(str(ico_path))
-    px = QPixmap(22, 22)
-    px.fill(Qt.transparent)
-    p = QPainter(px)
-    p.setRenderHint(QPainter.Antialiasing)
-    p.setBrush(QColor(color)); p.setPen(Qt.NoPen)
-    for x, y in [(2,4),(2,8),(2,12),(2,16),(5,16),(8,12),
-                  (11,16),(14,16),(17,4),(17,8),(17,12),(17,16)]:
-        p.drawEllipse(x, y, 3, 3)
-    p.end()
-    return QIcon(px)
+def _resource_path(relative: str) -> Path:
+    """Resolve an asset in source and PyInstaller one-file builds."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / relative
+
+
+def _make_icon() -> QIcon:
+    """
+    Load the real PolyWollyWin icon.
+
+    Prefer the Windows ICO for the tray/taskbar and fall back to the PNG.
+    """
+    for relative in ("assets/pww.ico", "assets/pww.png"):
+        path = _resource_path(relative)
+        if path.exists():
+            icon = QIcon(str(path))
+            if not icon.isNull():
+                return icon
+
+    fallback = QPixmap(64, 64)
+    fallback.fill(Qt.transparent)
+    painter = QPainter(fallback)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor("#e8001d"))
+    painter.drawEllipse(8, 8, 48, 48)
+    painter.end()
+    return QIcon(fallback)
+
 
 def _sep() -> QFrame:
     f = QFrame(); f.setFrameShape(QFrame.HLine)
@@ -247,47 +388,123 @@ def _version_key(version: str) -> tuple[int, ...]:
         parts.append(0)
     return tuple(parts)
 
+# Keep active update requests alive until Qt reports completion.
+_ACTIVE_UPDATE_CHECKS: set[QNetworkAccessManager] = set()
+
+
 def check_for_updates(parent=None, silent=False):
-    try:
-        with urlopen(LATEST_RELEASE_API, timeout=5) as response:
-            data = json.loads(response.read().decode())
-        latest  = data["tag_name"].replace("v", "").strip()
-        current = VERSION.strip().replace("v", "")
+    """
+    Check GitHub releases using Qt's network stack.
 
-        latest_key  = _version_key(latest)
-        current_key = _version_key(current)
+    Using QNetworkAccessManager avoids urllib's lazy imports from PyInstaller's
+    temporary base_library.zip, which can disappear during one-file lifecycle
+    transitions and produce misleading _MEI... errors.
+    """
+    owner = parent if isinstance(parent, QObject) else QApplication.instance()
+    manager = QNetworkAccessManager(owner)
+    _ACTIVE_UPDATE_CHECKS.add(manager)
 
-        # Only complain when GitHub is actually newer.
-        # Local/dev builds ahead of GitHub should not trigger an update prompt.
-        if latest_key > current_key:
-            msg = QMessageBox(parent)
-            msg.setWindowTitle("Update Available")
-            msg.setText(
-                f"A newer version is available.\n\n"
-                f"Current: v{current}\n"
-                f"Latest:  v{latest}"
-            )
-            dl_btn = msg.addButton("Open Releases", QMessageBox.AcceptRole)
-            msg.addButton(QMessageBox.Close)
-            msg.exec()
-            if msg.clickedButton() == dl_btn:
-                QDesktopServices.openUrl(QUrl(RELEASES_URL))
-        elif not silent:
-            if current_key > latest_key:
-                text = (
-                    f"No update needed.\n\n"
-                    f"Current local build: v{current}\n"
-                    f"Latest GitHub release: v{latest}"
-                )
-            else:
-                text = f"You are running the latest version:\n\nv{current}"
-            QMessageBox.information(parent, "No Updates", text)
-    except Exception as e:
+    request = QNetworkRequest(QUrl(LATEST_RELEASE_API))
+    request.setRawHeader(b"Accept", b"application/vnd.github+json")
+    request.setRawHeader(
+        b"User-Agent",
+        f"PolyWollyWin/{VERSION}".encode("ascii", errors="ignore"),
+    )
+
+    reply = manager.get(request)
+
+    timeout = QTimer(manager)
+    timeout.setSingleShot(True)
+    timeout.setInterval(8000)
+
+    def cleanup():
+        timeout.stop()
+        _ACTIVE_UPDATE_CHECKS.discard(manager)
+        reply.deleteLater()
+        manager.deleteLater()
+
+    def show_failure(message: str):
         if not silent:
-            msg = str(e)
-            if "404" in msg:
-                msg = "No GitHub releases exist yet.\n\nPublish a release first."
-            QMessageBox.warning(parent, "Update Check Failed", msg)
+            QMessageBox.warning(
+                parent,
+                "Update Check Failed",
+                f"Could not check for updates.\n\n{message}",
+            )
+
+    def on_timeout():
+        if reply.isRunning():
+            reply.abort()
+        show_failure("The request timed out.")
+        cleanup()
+
+    def on_finished():
+        if manager not in _ACTIVE_UPDATE_CHECKS:
+            return
+
+        try:
+            if reply.error() != QNetworkReply.NoError:
+                status = reply.attribute(
+                    QNetworkRequest.HttpStatusCodeAttribute
+                )
+                if status == 404:
+                    show_failure(
+                        "No published GitHub release was found yet."
+                    )
+                else:
+                    detail = reply.errorString().strip()
+                    show_failure(detail or "Network request failed.")
+                return
+
+            raw = bytes(reply.readAll())
+            data = json.loads(raw.decode("utf-8"))
+            latest = str(data["tag_name"]).replace("v", "").strip()
+            current = VERSION.strip().replace("v", "")
+
+            latest_key = _version_key(latest)
+            current_key = _version_key(current)
+
+            if latest_key > current_key:
+                msg = QMessageBox(parent)
+                msg.setWindowTitle("Update Available")
+                msg.setText(
+                    f"A newer version is available.\n\n"
+                    f"Current: v{current}\n"
+                    f"Latest:  v{latest}"
+                )
+                dl_btn = msg.addButton(
+                    "Open Releases", QMessageBox.AcceptRole
+                )
+                msg.addButton(QMessageBox.Close)
+                msg.exec()
+                if msg.clickedButton() == dl_btn:
+                    QDesktopServices.openUrl(QUrl(RELEASES_URL))
+            elif not silent:
+                if current_key > latest_key:
+                    message = (
+                        f"No update needed.\n\n"
+                        f"Current local build: v{current}\n"
+                        f"Latest GitHub release: v{latest}"
+                    )
+                else:
+                    message = (
+                        "You are running the latest version:"
+                        f"\n\nv{current}"
+                    )
+                QMessageBox.information(
+                    parent, "No Updates", message
+                )
+
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            show_failure("GitHub returned an unexpected response.")
+        except Exception:
+            # Do not expose internal PyInstaller paths or implementation details.
+            show_failure("An unexpected error occurred.")
+        finally:
+            cleanup()
+
+    timeout.timeout.connect(on_timeout)
+    reply.finished.connect(on_finished)
+    timeout.start()
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -2499,16 +2716,38 @@ def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
+    splash = StartupSplash()
+    splash_started = time.monotonic()
+    splash.center_on_screen()
+    splash.show()
+    splash.set_status("Loading application shell...", 10)
+
+    # Keep one icon alive for the entire process and use it consistently.
+    app_icon = _make_icon()
+    app.setWindowIcon(app_icon)
+
+    splash.set_status("Loading matrix driver...", 25)
     driver   = MatrixDriver()
+
+    splash.set_status("Loading saved settings...", 40)
     settings = Settings()
 
-    qc     = QuickControls(driver)
+    splash.set_status("Building quick controls...", 55)
+    qc = QuickControls(driver)
+
+    splash.set_status("Building main window...", 70)
     window = ControlWindow(driver, settings)
+    window.setWindowIcon(app_icon)
+    qc.setWindowIcon(app_icon)
     window.sync_quick_controls(qc)
 
+    splash.set_status("Preparing system tray...", 82)
     tray = TrayApp(driver, qc, window)
+    tray.setIcon(app_icon)
+    tray._stable_icon = app_icon
     tray.show()
 
+    splash.set_status("Finalizing startup...", 92)
     if settings.get_start_minimized():
         window.hide()
     else:
@@ -2532,6 +2771,14 @@ def main():
     timer.setInterval(TICK_MS)
     timer.timeout.connect(_tick)
     timer.start()
+
+    splash.set_status("Ready", 100)
+
+    # Keep the splash visible for at least four seconds so startup never
+    # appears to flash by suspiciously fast.
+    elapsed_ms = int((time.monotonic() - splash_started) * 1000)
+    remaining_ms = max(0, 4000 - elapsed_ms)
+    splash.finish_later(remaining_ms)
 
     # Silent auto-update check disabled for faster startup and no dev-build nagging.
     # Manual checking is still available from the Check Updates button.
