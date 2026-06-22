@@ -145,6 +145,7 @@ class Settings:
     def get_gif_oy(self)        -> int:   return int(self._s.value("gif_oy", -18))
     def get_gif_scale(self)     -> int:   return int(self._s.value("gif_scale", 41))
     def get_close_to_tray(self) -> bool:  return self._s.value("close_to_tray", "true").lower() == "true"
+    def get_start_minimized(self) -> bool: return self._s.value("start_minimized", "false").lower() == "true"
     def get_persist_enabled(self) -> bool: return self._s.value("persist_enabled", "false").lower() == "true"
     def get_last_mode(self)     -> str:   return str(self._s.value("last_mode", ""))
     def get_blend_effect(self)  -> str:   return str(self._s.value("blend_effect", ""))
@@ -163,6 +164,9 @@ class Settings:
     def set_gif_oy(self, v: int):         self._s.setValue("gif_oy", v)
     def set_gif_scale(self, v: int):      self._s.setValue("gif_scale", v)
     def set_close_to_tray(self, v: bool): self._s.setValue("close_to_tray", str(v).lower())
+    def set_start_minimized(self, v: bool):
+        self._s.setValue("start_minimized", str(v).lower())
+        self._s.sync()
     def set_persist_enabled(self, v: bool): self._s.setValue("persist_enabled", str(v).lower())
     def set_last_mode(self, v: str):      self._s.setValue("last_mode", v)
     def set_blend_effect(self, v: str):   self._s.setValue("blend_effect", v)
@@ -1920,6 +1924,13 @@ class ControlWindow(QWidget):
         self._startup.setChecked(self._get_startup())
         self._startup.stateChanged.connect(self._set_startup)
 
+        self._start_minimized = QCheckBox("Start minimized")
+        self._start_minimized.setStyleSheet("color:#666; font-size:10px;")
+        self._start_minimized.setChecked(self._settings.get_start_minimized())
+        self._start_minimized.stateChanged.connect(
+            lambda state: self._settings.set_start_minimized(bool(state))
+        )
+
         version_label = QLabel(f"v{VERSION}")
         version_label.setStyleSheet("color:#555; font-size:10px;")
         author_label  = QLabel(f"by {AUTHOR_NAME}")
@@ -1953,6 +1964,8 @@ class ControlWindow(QWidget):
         footer1.addWidget(self._close_to_tray)
         footer1.addSpacing(8)
         footer1.addWidget(self._startup)
+        footer1.addSpacing(8)
+        footer1.addWidget(self._start_minimized)
         footer1.addSpacing(8)
         footer1.addWidget(self._persist_cb)
         footer1.addSpacing(6)
@@ -2496,9 +2509,14 @@ def main():
     tray = TrayApp(driver, qc, window)
     tray.show()
 
-    window.show()
+    if settings.get_start_minimized():
+        window.hide()
+    else:
+        window.show()
+        window.raise_()
+        window.activateWindow()
 
-    # Try to auto-connect after the UI is visible so the button/status update cleanly.
+    # Auto-connect whether the main window is visible or minimized to tray.
     QTimer.singleShot(500, window._connect)
 
     # Main tick timer
