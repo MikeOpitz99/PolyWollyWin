@@ -2530,6 +2530,7 @@ class ControlWindow(QWidget):
         super().__init__()
         self._driver   = driver
         self._settings = settings or Settings()
+        self._force_quit = False
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(_make_icon())
         self.setMinimumWidth(760)
@@ -3036,12 +3037,64 @@ class ControlWindow(QWidget):
         self._settings.clear()
         self._persist_cb.setChecked(False)
 
+    def request_quit(self):
+        """Exit immediately without allowing cleanup code to trap the process."""
+        if self._force_quit:
+            return
+
+        self._force_quit = True
+
+        try:
+            self._save()
+        except Exception:
+            pass
+
+        # Remove the UI immediately so the user gets instant feedback.
+        try:
+            self.hide()
+        except Exception:
+            pass
+
+        app = QApplication.instance()
+
+        # Hard-stop watchdog. If audio, HID, or another dependency hangs during
+        # cleanup, the process is terminated instead of remaining in Task Manager.
+        watchdog = threading.Timer(2.0, lambda: os._exit(0))
+        watchdog.daemon = True
+        watchdog.start()
+
+        def _cleanup_and_exit():
+            try:
+                self._driver.cleanup()
+            except Exception:
+                pass
+            finally:
+                os._exit(0)
+
+        cleanup_thread = threading.Thread(
+            target=_cleanup_and_exit,
+            name="PolyWollyWinShutdown",
+            daemon=True,
+        )
+        cleanup_thread.start()
+
+        if app is not None:
+            app.setQuitOnLastWindowClosed(True)
+            app.exit(0)
+
     def closeEvent(self, event):
         self._save()
+
+        if self._force_quit:
+            event.accept()
+            return
+
         if self._close_to_tray.isChecked():
-            event.ignore(); self.hide()
+            event.ignore()
+            self.hide()
         else:
-            self._driver.cleanup(); QApplication.quit()
+            event.accept()
+            self.request_quit()
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -3122,8 +3175,7 @@ class TrayApp(QSystemTrayIcon):
                 self._window.activateWindow()
 
     def _quit(self):
-        self._driver.cleanup()
-        QApplication.quit()
+        self._window.request_quit()
 
 
 # ─────────────────────────────────────────────────────────────────────
