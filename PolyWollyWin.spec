@@ -192,8 +192,6 @@ a = Analysis(
         "PIL.SpiderImagePlugin",
         "PIL.SunImagePlugin",
         "PIL.TgaImagePlugin",
-        "PIL.TiffImagePlugin",
-        "PIL.TiffTags",
         "PIL.WmfImagePlugin",
         "PIL.XVThumbImagePlugin",
         "PIL.XbmImagePlugin",
