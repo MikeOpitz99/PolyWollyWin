@@ -1,5 +1,5 @@
 #define MyAppName "PolyWollyWin"
-#define MyAppVersion "3.0.0"
+#define MyAppVersion "3.0.1"
 #define MyAppPublisher "Mike Opitz"
 #define MyAppURL "https://github.com/MikeOpitz99/PolyWollyWin"
 #define MyAppExeName "PolyWollyWin.exe"
@@ -27,10 +27,8 @@ OutputDir={#ReleaseDir}
 OutputBaseFilename=PolyWollyWin-v{#MyAppVersion}-Setup
 SetupIconFile={#SourceRoot}\assets\pww.ico
 
-; Inno compresses the complete PyInstaller onedir folder.
 Compression=lzma2/ultra64
 SolidCompression=yes
-LZMAUseSeparateProcess=yes
 
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -46,7 +44,6 @@ Name: "startup"; Description: "Run {#MyAppName} when Windows starts"; GroupDescr
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-; Copy the complete PyInstaller onedir build.
 Source: "{#DistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 Source: "{#SourceRoot}\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
@@ -74,8 +71,6 @@ Filename: "taskkill"; \
     Flags: runhidden; RunOnceId: "KillPolyWollyWin"
 
 [UninstallDelete]
-; Inno normally removes installed files automatically.
-; This cleans any leftovers inside the private dependency folder.
 Type: filesandordirs; Name: "{app}\_internal"
 Type: files; Name: "{app}\README.md"
 Type: files; Name: "{app}\CHANGELOG.md"
