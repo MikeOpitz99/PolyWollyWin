@@ -3,7 +3,7 @@
 Custom matrix controller for the **ROG Strix Flare II Animate** keyboard.  
 Bypasses Armoury Crate entirely — direct HID control.
 <p align="center">
-  <img src="assets/pww.png" width="128">
+  <img src="assets/pwwAnim.gif" width="128">
 </p>
 ---
 
