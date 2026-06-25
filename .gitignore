@@ -57,3 +57,8 @@ build_exe.bat
 # IMPORTANT:
 # PolyWollyWin.spec and PolyWollyWin.iss are intentionally NOT ignored.
 # They belong in the public repo.
+
+# Release binaries belong in GitHub Releases, not Git history
+releases/*.exe
+releases/*.zip
+releases/*.7z
