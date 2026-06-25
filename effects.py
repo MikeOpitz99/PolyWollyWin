@@ -1707,6 +1707,601 @@ class AudioVisualizer(BaseEffect):
         return self._emit(frame)
 
 # ─────────────────────────────────────────────────────────────────────
+# Additional shared-capture audio visualizers
+# ─────────────────────────────────────────────────────────────────────
+
+class _AudioReactiveBase(AudioVisualizer):
+    """
+    Broadband audio analysis.
+
+    Low, low-mid, high-mid, and treble bands are normalized independently and
+    averaged so bass-heavy instrumentals and high soprano vocals both register.
+    """
+
+    def __init__(self, sensitivity: float = 1.0,
+                 falloff: float = 0.84, x_pos: float = 50.0,
+                 y_pos: float = 50.0, **_kwargs):
+        super().__init__(
+            sensitivity=sensitivity,
+            boost=1.0,
+            falloff=falloff,
+            floor=0.0,
+        )
+        self.x_pos = x_pos
+        self.y_pos = y_pos
+        self._level = 0.0
+        self._beat = 0.0
+        self._phase = 0.0
+        self._last_raw = None
+        self._beat_gate = False
+
+        self._band_agc = np.full(4, 0.0025, dtype=np.float32)
+        self._wave_agc = 0.0035
+        self._broad_avg = 0.08
+        self._prev_bands = np.zeros(4, dtype=np.float32)
+        self._activity = 0.0
+
+    def apply_controls(self, sensitivity: float, falloff: float, **extra):
+        self.sensitivity = float(sensitivity)
+        self.falloff = float(falloff)
+        for attr, value in extra.items():
+            if hasattr(self, attr):
+                setattr(self, attr, value)
+
+    @staticmethod
+    def _band_rms(fft: np.ndarray, freqs: np.ndarray,
+                  lo: float, hi: float) -> float:
+        mask = (freqs >= lo) & (freqs < hi)
+        if not np.any(mask):
+            return 0.0
+        vals = fft[mask]
+        return float(np.sqrt(np.mean(vals * vals)))
+
+    def _audio_metrics(self, dt: float) -> tuple[float, float]:
+        """
+        Return continuous activity and transient emphasis.
+
+        The continuous activity follows the same normalized waveform behavior
+        that makes Oscilloscope responsive, while the FFT bands ensure bass,
+        instruments, vocals, soprano, and treble all contribute equally.
+        """
+        raw, last_audio_t, samplerate, mode = _SHARED_AUDIO_CAPTURE.get()
+        self._last_audio_t = last_audio_t
+        self._samplerate = samplerate
+        self._mode = mode
+        self._phase += dt
+        self._last_raw = raw
+
+        decay = max(0.50, min(0.985, float(self.falloff)))
+
+        if raw is None or len(raw) < 256:
+            self._activity *= decay
+            self._level = self._activity
+            self._beat *= 0.58
+            return self._level, self._beat
+
+        data = np.nan_to_num(
+            raw.astype(np.float32), nan=0.0,
+            posinf=0.0, neginf=0.0,
+        )
+        data -= float(np.mean(data))
+
+        # Oscilloscope-style waveform activity. The rolling AGC makes normal
+        # program material strongly visible at sensitivity 1.0.
+        wave_peak = float(np.percentile(np.abs(data), 90))
+        self._wave_agc = max(self._wave_agc * 0.997, wave_peak * 1.35)
+        wave_norm = float(np.clip(
+            wave_peak / max(0.00035, self._wave_agc), 0.0, 1.25
+        ))
+
+        window = np.hanning(len(data)).astype(np.float32)
+        fft = np.abs(np.fft.rfft(data * window))
+        freqs = np.fft.rfftfreq(
+            len(data), d=1.0 / max(8000, int(samplerate))
+        )
+        nyquist = max(4000.0, samplerate / 2.0)
+
+        bands = np.array([
+            self._band_rms(fft, freqs, 35.0, 250.0),
+            self._band_rms(fft, freqs, 250.0, 1600.0),
+            self._band_rms(fft, freqs, 1600.0, 5000.0),
+            self._band_rms(fft, freqs, 5000.0, min(16000.0, nyquist)),
+        ], dtype=np.float32)
+
+        self._band_agc = np.maximum(
+            self._band_agc * 0.997,
+            bands * 1.45,
+        )
+        normalized = np.clip(
+            bands / np.maximum(self._band_agc, 0.00020),
+            0.0, 1.30,
+        )
+
+        broadband = float(np.mean(normalized))
+        sensitivity = max(0.20, min(4.0, float(self.sensitivity)))
+
+        # Waveform carries the same response feel as Oscilloscope. Broadband
+        # energy fills in material concentrated in any frequency range.
+        raw_activity = max(
+            wave_norm * 0.88,
+            broadband * 0.82,
+            (wave_norm * 0.58 + broadband * 0.42),
+        )
+        target = float(np.clip(raw_activity * sensitivity, 0.0, 1.0))
+
+        positive_flux = np.maximum(0.0, normalized - self._prev_bands)
+        flux = float(np.mean(positive_flux))
+        self._prev_bands = normalized
+
+        self._broad_avg = self._broad_avg * 0.965 + raw_activity * 0.035
+        relative = raw_activity / max(0.035, self._broad_avg)
+        transient = max(
+            0.0,
+            (relative - 1.015) / 0.62,
+            flux * 2.1,
+        )
+        pulse = float(np.clip(transient * sensitivity, 0.0, 1.0))
+
+        # Fast rise, controlled fall. Continuous activity never waits for a beat.
+        self._activity = max(target, self._activity * decay)
+        self._level = self._activity
+        self._beat = max(pulse, self._beat * 0.54)
+        return self._level, self._beat
+
+    def _new_beat(self, beat: float, threshold: float = 0.22) -> bool:
+        active = beat >= threshold
+        fired = active and not self._beat_gate
+        if not active and beat < threshold * 0.55:
+            self._beat_gate = False
+        elif active:
+            self._beat_gate = True
+        return fired
+
+
+class SpectrumAudioVisualizer(_AudioReactiveBase):
+    """Broadband spectrum with bright leaders and dim falling trails."""
+    name = "Spectrum Bars"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._bars = np.zeros(COLS, dtype=np.float32)
+        self._leaders = np.zeros(COLS, dtype=np.float32)
+        self._bar_agc = np.full(COLS, 0.0025, dtype=np.float32)
+
+    def tick(self, dt: float) -> list[int]:
+        level, _pulse = self._audio_metrics(dt)
+        raw = self._last_raw
+        targets = np.zeros(COLS, dtype=np.float32)
+
+        if raw is not None and len(raw) >= 256:
+            data = np.nan_to_num(
+                raw.astype(np.float32), nan=0.0,
+                posinf=0.0, neginf=0.0,
+            )
+            data -= float(np.mean(data))
+            window = np.hanning(len(data)).astype(np.float32)
+            fft = np.abs(np.fft.rfft(data * window))
+            freqs = np.fft.rfftfreq(
+                len(data), d=1.0 / max(8000, int(self._samplerate))
+            )
+
+            lo = 35.0
+            hi = min(16000.0, max(4000.0, self._samplerate / 2.0))
+            edges = np.geomspace(lo, hi, COLS + 1)
+            bands = np.zeros(COLS, dtype=np.float32)
+            for i in range(COLS):
+                mask = (freqs >= edges[i]) & (freqs < edges[i + 1])
+                if np.any(mask):
+                    vals = fft[mask]
+                    bands[i] = float(np.sqrt(np.mean(vals * vals)))
+
+            self._bar_agc = np.maximum(
+                self._bar_agc * 0.997,
+                bands * 1.42,
+            )
+            normalized = np.clip(
+                bands / np.maximum(self._bar_agc, 0.00020),
+                0.0, 1.25,
+            )
+            targets = np.clip(
+                normalized * max(0.20, float(self.sensitivity))
+                * max(0.55, level),
+                0.0, 1.0,
+            )
+
+        # Bars drop at normal falloff speed.
+        bar_decay = max(0.35, min(0.965, float(self.falloff)))
+        self._bars = np.maximum(targets, self._bars * bar_decay)
+
+        # Leader rises immediately, but falls at roughly half the bar drop speed.
+        leader_drop_per_second = 5.5 + (1.0 - float(self.falloff)) * 18.0
+        falling = np.maximum(0.0, self._leaders - leader_drop_per_second * dt / ROWS)
+        self._leaders = np.maximum(self._bars, falling)
+
+        frame = np.zeros((ROWS, COLS), dtype=np.uint8)
+        for c in range(COLS):
+            height = int(round(self._bars[c] * (ROWS - 1)))
+            if height > 0:
+                top_row = ROWS - 1 - height
+                # Dim trail/body below the bright active top.
+                for r in range(top_row + 1, ROWS):
+                    if MASK_NP[r, c]:
+                        frame[r, c] = 105
+                if 0 <= top_row < ROWS and MASK_NP[top_row, c]:
+                    frame[top_row, c] = 225
+
+            lead_row = ROWS - 1 - int(round(self._leaders[c] * (ROWS - 1)))
+            if 0 <= lead_row < ROWS and MASK_NP[lead_row, c]:
+                frame[lead_row, c] = 255
+
+            # Two dim points behind the leader as it falls downward.
+            for offset, bri in ((1, 105), (2, 55)):
+                trail_row = lead_row - offset
+                if 0 <= trail_row < ROWS and MASK_NP[trail_row, c]:
+                    frame[trail_row, c] = max(frame[trail_row, c], bri)
+
+        return self._emit(frame)
+
+
+class AudioStarburstEffect(_AudioReactiveBase):
+    """Beat-driven starbursts with adjustable origin."""
+    name = "Center Starburst"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._rr, self._cc = np.indices((ROWS, COLS), dtype=np.float32)
+        self._bursts: list[dict] = []
+        self._trail = np.zeros((ROWS, COLS), dtype=np.float32)
+        self._event_timer = 0.0
+
+    def _spawn(self, strength: float):
+        cr = np.clip(float(self.y_pos), 0, 100) / 100.0 * (ROWS - 1)
+        cc = np.clip(float(self.x_pos), 0, 100) / 100.0 * (COLS - 1)
+        self._bursts.append({
+            "radius": 0.0,
+            "strength": max(0.25, strength),
+            "cr": cr,
+            "cc": cc,
+            "rays": int(np.random.choice([6, 8, 10, 12])),
+            "phase": float(np.random.uniform(0, math.tau)),
+        })
+
+    def tick(self, dt: float) -> list[int]:
+        level, beat = self._audio_metrics(dt)
+        self._event_timer += dt
+        interval = max(0.045, 0.22 - level * 0.16)
+        if beat > 0.16 or (level > 0.08 and self._event_timer >= interval):
+            self._spawn(max(0.28, level, beat))
+            self._event_timer = 0.0
+
+        self._trail *= max(0.42, min(0.975, float(self.falloff)))
+        keep = []
+
+        for burst in self._bursts:
+            burst["radius"] += dt * (5.0 + 15.0 * burst["strength"])
+            dr = self._rr - burst["cr"]
+            dc = (self._cc - burst["cc"]) * (ROWS / max(1.0, COLS))
+            dist = np.sqrt(dr * dr + dc * dc)
+            angle = np.arctan2(dr, dc)
+
+            ring = np.exp(
+                -((dist - burst["radius"]) ** 2) /
+                max(0.18, 0.50 - burst["strength"] * 0.18)
+            )
+            rays = (
+                0.18 +
+                0.82 * np.maximum(
+                    0.0,
+                    np.cos(
+                        angle * burst["rays"] + burst["phase"]
+                    )
+                ) ** 10
+            )
+
+            self._trail = np.maximum(
+                self._trail,
+                ring * rays * 255.0 * burst["strength"],
+            )
+            if burst["radius"] < ROWS * 1.8:
+                keep.append(burst)
+
+        self._bursts = keep
+        return self._emit(np.clip(self._trail, 0, 255).astype(np.uint8))
+
+
+class AudioCornerConvergenceEffect(_AudioReactiveBase):
+    """
+    Thin beat-triggered flame streams from all four corners toward an X/Y target.
+    """
+    name = "Corner Convergence"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._streams: list[dict] = []
+        self._trail = np.zeros((ROWS, COLS), dtype=np.float32)
+        self._event_timer = 0.0
+        self._corners = [
+            (0.0, 0.0),
+            (0.0, float(COLS - 1)),
+            (float(ROWS - 1), 0.0),
+            (float(ROWS - 1), float(COLS - 1)),
+        ]
+
+    def _spawn(self, strength: float):
+        target_r = (
+            np.clip(float(self.y_pos), 0, 100) / 100.0 * (ROWS - 1)
+        )
+        target_c = (
+            np.clip(float(self.x_pos), 0, 100) / 100.0 * (COLS - 1)
+        )
+        for corner_r, corner_c in self._corners:
+            self._streams.append({
+                "p": 0.0,
+                "strength": max(0.30, strength),
+                "r0": corner_r,
+                "c0": corner_c,
+                "r1": target_r,
+                "c1": target_c,
+                "phase": float(np.random.uniform(0, math.tau)),
+            })
+
+    def tick(self, dt: float) -> list[int]:
+        level, beat = self._audio_metrics(dt)
+        self._event_timer += dt
+        interval = max(0.050, 0.20 - level * 0.145)
+        if beat > 0.14 or (level > 0.08 and self._event_timer >= interval):
+            self._spawn(max(0.30, level, beat))
+            self._event_timer = 0.0
+
+        self._trail *= max(0.40, min(0.97, float(self.falloff)))
+        keep = []
+
+        for stream in self._streams:
+            stream["p"] += dt * (0.75 + 2.7 * stream["strength"])
+            p = stream["p"]
+            if p > 1.12:
+                continue
+
+            # Small flame-like sideways flicker while preserving convergence.
+            flicker = math.sin(
+                p * 18.0 + stream["phase"]
+            ) * (0.45 + 0.55 * (1.0 - min(1.0, p)))
+
+            r = stream["r0"] + (stream["r1"] - stream["r0"]) * min(1.0, p)
+            c = stream["c0"] + (stream["c1"] - stream["c0"]) * min(1.0, p)
+
+            dr = stream["r1"] - stream["r0"]
+            dc = stream["c1"] - stream["c0"]
+            length = max(1.0, math.hypot(dr, dc))
+            # Perpendicular offset gives thin flames instead of a rigid X.
+            r += (-dc / length) * flicker
+            c += (dr / length) * flicker
+
+            rr = int(round(r))
+            cc = int(round(c))
+            bri = 255.0 * stream["strength"] * max(0.25, 1.0 - abs(p - 0.82) * 0.45)
+
+            for drr, dcc, scale in (
+                (0, 0, 1.0),
+                (-1, 0, 0.28),
+                (1, 0, 0.28),
+                (0, -1, 0.22),
+                (0, 1, 0.22),
+            ):
+                r2, c2 = rr + drr, cc + dcc
+                if (
+                    0 <= r2 < ROWS and 0 <= c2 < COLS
+                    and MASK_NP[r2, c2]
+                ):
+                    self._trail[r2, c2] = max(
+                        self._trail[r2, c2], bri * scale
+                    )
+
+            keep.append(stream)
+
+        self._streams = keep
+        return self._emit(np.clip(self._trail, 0, 255).astype(np.uint8))
+
+
+class AudioCenterWaveEffect(_AudioReactiveBase):
+    """Signed oscilloscope trace across one horizontal baseline."""
+    name = "Oscilloscope"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._points = np.zeros(COLS, dtype=np.float32)
+
+    def tick(self, dt: float) -> list[int]:
+        level, _beat = self._audio_metrics(dt)
+        raw = self._last_raw
+
+        target = np.zeros(COLS, dtype=np.float32)
+        if raw is not None and len(raw) >= COLS:
+            data = np.nan_to_num(
+                raw.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0
+            )
+            data -= float(np.mean(data))
+
+            # Average samples into columns while retaining signed waveform.
+            chunks = np.array_split(data, COLS)
+            target = np.array(
+                [float(np.mean(chunk)) if len(chunk) else 0.0
+                 for chunk in chunks],
+                dtype=np.float32,
+            )
+            scale = max(
+                0.0004,
+                float(np.percentile(np.abs(target), 90)),
+            )
+            target = np.clip(target / scale, -1.0, 1.0)
+            target *= min(1.0, level * 1.5)
+
+        decay = max(0.30, min(0.94, float(self.falloff)))
+        self._points = target * (1.0 - decay * 0.45) + self._points * decay
+
+        frame = np.zeros((ROWS, COLS), dtype=np.uint8)
+        mid = int(round(
+            np.clip(float(self.y_pos), 0, 100) / 100.0 * (ROWS - 1)
+        ))
+        amplitude = max(1.0, (ROWS - 2) * 0.48)
+
+        previous_r = mid
+        for c in range(COLS):
+            r = int(round(mid - self._points[c] * amplitude))
+            r = max(0, min(ROWS - 1, r))
+
+            # Connect adjacent samples so it reads as one oscilloscope line.
+            r0, r1 = sorted((previous_r, r))
+            for rr in range(r0, r1 + 1):
+                if MASK_NP[rr, c]:
+                    frame[rr, c] = 255
+            previous_r = r
+
+        # Straight dim baseline when audio is quiet.
+        if level < 0.10:
+            for c in range(COLS):
+                if MASK_NP[mid, c]:
+                    frame[mid, c] = max(frame[mid, c], 85)
+
+        return self._emit(frame)
+
+
+class AudioRandomStarsEffect(_AudioReactiveBase):
+    """Beat-triggered stars that twinkle and fade."""
+    name = "Random Stars"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._stars: list[dict] = []
+        self._valid = np.argwhere(MASK_NP)
+        self._spawn_cooldown = 0.0
+
+    def _spawn(self, strength: float):
+        count = max(1, int(round(1 + strength * 6)))
+        for _ in range(count):
+            r, c = self._valid[
+                np.random.randint(0, len(self._valid))
+            ]
+            self._stars.append({
+                "r": int(r),
+                "c": int(c),
+                "life": 1.0,
+                "phase": float(np.random.uniform(0, math.tau)),
+                "speed": float(np.random.uniform(8.0, 15.0)),
+            })
+
+    def tick(self, dt: float) -> list[int]:
+        level, beat = self._audio_metrics(dt)
+        self._spawn_cooldown = max(0.0, self._spawn_cooldown - dt)
+
+        # React to all audible activity, with transients creating denser bursts.
+        should_spawn = beat > 0.11
+        if level > 0.07 and self._spawn_cooldown <= 0.0:
+            should_spawn = True
+
+        if should_spawn:
+            self._spawn(max(0.24, level, beat))
+            self._spawn_cooldown = max(0.035, 0.18 - level * 0.12)
+
+        frame = np.zeros((ROWS, COLS), dtype=np.float32)
+        keep = []
+        fade_rate = (
+            0.75 +
+            (1.0 - max(0.50, min(0.98, float(self.falloff)))) * 7.5
+        )
+
+        for star in self._stars:
+            star["life"] -= dt * fade_rate
+            star["phase"] += dt * star["speed"]
+            if star["life"] <= 0:
+                continue
+
+            twinkle = 0.45 + 0.55 * (
+                math.sin(star["phase"]) * 0.5 + 0.5
+            )
+            bri = 255.0 * star["life"] * twinkle
+            r, c = star["r"], star["c"]
+            frame[r, c] = max(frame[r, c], bri)
+
+            if bri > 120:
+                for dr, dc in (
+                    (-1, 0), (1, 0), (0, -1), (0, 1)
+                ):
+                    rr, cc = r + dr, c + dc
+                    if (
+                        0 <= rr < ROWS and 0 <= cc < COLS
+                        and MASK_NP[rr, cc]
+                    ):
+                        frame[rr, cc] = max(
+                            frame[rr, cc], bri * 0.32
+                        )
+            keep.append(star)
+
+        self._stars = keep
+        return self._emit(np.clip(frame, 0, 255).astype(np.uint8))
+
+
+class AudioFireEffect(_AudioReactiveBase):
+    """Existing good fire visualizer using broadband response."""
+    name = "Audio Fire"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._heat = np.zeros((ROWS, COLS), dtype=np.float32)
+        self._acc = 0.0
+
+    @staticmethod
+    def _shift(arr, dr, dc):
+        out = np.zeros_like(arr)
+        r_src0 = max(0, -dr); r_src1 = ROWS - max(0, dr)
+        c_src0 = max(0, -dc); c_src1 = COLS - max(0, dc)
+        r_dst0 = max(0, dr); r_dst1 = ROWS - max(0, -dr)
+        c_dst0 = max(0, dc); c_dst1 = COLS - max(0, -dc)
+        out[r_dst0:r_dst1, c_dst0:c_dst1] = arr[
+            r_src0:r_src1, c_src0:c_src1
+        ]
+        return out
+
+    def _advance(self, level: float, beat: float):
+        src = np.zeros((ROWS, COLS), dtype=bool)
+        src[max(0, ROWS - 3):ROWS, :] = True
+        ignition = np.clip(
+            0.04 + level * 0.92 + beat * 0.28, 0.0, 0.98
+        )
+        hot = (np.random.random((ROWS, COLS)) < ignition) & src
+        seed = np.random.uniform(
+            110, 255, (ROWS, COLS)
+        ).astype(np.float32)
+        self._heat[hot] = np.maximum(self._heat[hot], seed[hot])
+        self._heat[src & ~hot] *= 0.72
+
+        up = self._shift(self._heat, -1, 0)
+        up_l = self._shift(self._heat, -1, -1)
+        up_r = self._shift(self._heat, -1, 1)
+        up2 = self._shift(self._heat, -2, 0)
+        mixed = (
+            up * 0.48 + up_l * 0.18 +
+            up_r * 0.18 + up2 * 0.16
+        )
+        cooling = 10.0 + (1.0 - level) * 22.0
+        cool = np.random.uniform(
+            0.55, 1.45, (ROWS, COLS)
+        ) * cooling
+        self._heat = np.maximum(0.0, mixed - cool)
+
+    def tick(self, dt: float) -> list[int]:
+        level, beat = self._audio_metrics(dt)
+        self._acc += dt
+        while self._acc >= 1.0 / 30.0:
+            self._acc -= 1.0 / 30.0
+            self._advance(level, beat)
+        return self._emit(
+            np.clip(self._heat, 0, 255).astype(np.uint8)
+        )
+
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Fire  (demoscene cellular-automaton flame)
 # ─────────────────────────────────────────────────────────────────────
 
@@ -2142,7 +2737,7 @@ class ChaseEffect(BaseEffect):
 # KITT Audio  (scanner speed & brightness driven by audio level)
 # ═════════════════════════════════════════════════════════════════════
 
-class KITTAudioEffect(AudioVisualizer):
+class KITTAudioEffect(_AudioReactiveBase):
     """
     KITT/KARR discrete dot-fade voice display.
 
@@ -2176,15 +2771,19 @@ class KITTAudioEffect(AudioVisualizer):
 
     def __init__(self, style: float = 0.0, sensitivity: float = 1.0, boost: float = 1.0,
                  x_pos: float = 66.0, y_pos: float = 45.0):
-        super().__init__(sensitivity=sensitivity, boost=boost,
-                         falloff=0.70, floor=0.0)
+        super().__init__(
+            sensitivity=sensitivity,
+            falloff=0.70,
+            x_pos=x_pos,
+            y_pos=y_pos,
+        )
+        self.boost = boost
         self.style = style
         self.x_pos = x_pos
         self.y_pos = y_pos
 
-        # Locked values.
+        # Locked geometry values.
         self.width = 3.0
-        self.falloff = 0.70
         self.floor = 0.0
 
         # Strong internal gain. UI sliders now trim around this.
@@ -2192,6 +2791,7 @@ class KITTAudioEffect(AudioVisualizer):
         self._base_boost = 50.0
 
         self._vu_agc = 0.025
+        self._band_agc = np.full(4, 0.0025, dtype=np.float32)
         self._smooth_level = 0.0
         self._kitt_debug_last = 0.0
         self._geom_key = None
@@ -2246,68 +2846,14 @@ class KITTAudioEffect(AudioVisualizer):
             cols = [c for c in range(c0, c1) if np.any(MASK_NP[:, c])]
             self._groups.append(cols)
 
-    def _voice_high_level(self):
-        raw, last_audio_t, samplerate, mode = _SHARED_AUDIO_CAPTURE.get()
-        self._last_audio_t = last_audio_t
-        self._samplerate = samplerate
-        self._mode = mode
-
-        if raw is None or len(raw) < 256:
-            return 0.0, 0.0, 0.0, mode
-
-        raw = np.nan_to_num(raw.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
-        raw -= float(np.mean(raw))
-        full_rms = float(np.sqrt(np.mean(raw * raw)))
-
-        window = np.hanning(len(raw)).astype(np.float32)
-        fft = np.abs(np.fft.rfft(raw * window))
-        freqs = np.fft.rfftfreq(len(raw), d=1.0 / max(8000, samplerate))
-        if len(fft) < 16:
-            return 0.0, full_rms, 0.0, mode
-
-        def band_energy(lo, hi):
-            hi = min(float(hi), samplerate / 2.0)
-            mask = (freqs >= float(lo)) & (freqs < hi)
-            if not np.any(mask):
-                return 0.0
-            vals = fft[mask]
-            return float(np.sqrt(np.mean(vals * vals)))
-
-        low_voice = band_energy(300, 1200)
-        presence = band_energy(1200, 4200)
-        highs = band_energy(4200, 9000)
-        bass = band_energy(45, 220)
-
-        voice = low_voice * 0.25 + presence * 1.00 + highs * 0.70
-        voice = max(0.0, voice - bass * 0.34)
-
-        if voice < 0.00001:
-            return 0.0, full_rms, voice, mode
-
-        self._vu_agc = max(self._vu_agc * 0.993, voice * 2.35, 0.0005)
-        norm = voice / max(self._vu_agc, 0.0005)
-
-        sensitivity_trim = max(0.5, min(1.5, float(getattr(self, "sensitivity", 1.0))))
-        boost_trim = max(0.5, min(1.5, float(getattr(self, "boost", 1.0))))
-
-        effective_sensitivity = self._base_sensitivity * sensitivity_trim
-        effective_boost = self._base_boost * boost_trim
-
-        level = norm * effective_sensitivity * effective_boost * 0.0056
-        level = np.log1p(level * 1.35) / 1.72
-        level = float(np.clip(level, 0.0, 1.0))
-
-        if level < 0.070:
-            level = 0.0
-        else:
-            level = ((level - 0.070) / 0.930) ** 1.18
-
-        return float(np.clip(level, 0.0, 1.0)), full_rms, voice, mode
+    def _voice_high_level(self, dt: float = 1.0 / 60.0):
+        level, pulse = self._audio_metrics(dt)
+        return level, level, pulse, self._mode
 
     def _quantize_level(self, level: float) -> int:
         if level <= 0.0:
             return 0
-        thresholds = [0.10, 0.23, 0.37, 0.54, 0.73, 0.91]
+        thresholds = [0.06, 0.16, 0.28, 0.42, 0.58, 0.76]
         out = 0
         for t in thresholds:
             if level >= t:
@@ -2502,7 +3048,7 @@ class KITTAudioEffect(AudioVisualizer):
     def tick(self, dt: float) -> list[int]:
         self._rebuild_geometry_if_needed()
 
-        level, rms, voice, mode = self._voice_high_level()
+        level, rms, voice, mode = self._voice_high_level(dt)
 
         if level > self._smooth_level:
             self._smooth_level += (level - self._smooth_level) * 0.62
@@ -2550,6 +3096,20 @@ class KITTAudioEffect(AudioVisualizer):
 
         return self._emit(self._dot_state.astype(np.uint8))
 
+
+# Dedicated Audio-tab visualizer registry.
+# This must remain below every referenced class definition.
+AUDIO_VISUALIZERS: dict[str, type[AudioVisualizer]] = {
+    "Spectrum Bars": SpectrumAudioVisualizer,
+    "KITT / KARR": KITTAudioEffect,
+    "Center Starburst": AudioStarburstEffect,
+    "Corner Convergence": AudioCornerConvergenceEffect,
+    "Oscilloscope": AudioCenterWaveEffect,
+    "Random Stars": AudioRandomStarsEffect,
+    "Audio Fire": AudioFireEffect,
+}
+
+
 # ═════════════════════════════════════════════════════════════════════
 # Registry
 # ═════════════════════════════════════════════════════════════════════
@@ -2583,7 +3143,7 @@ ALL_EFFECTS: list[type[BaseEffect]] = [
     MetaballsEffect,
 #    GameOfLifeEffect,
     ChaseEffect,
-   KITTAudioEffect,  # enable in Audio tab or uncomment to show in Effects list
+#    KITTAudioEffect,  # moved to dedicated Audio tab
 ]
 
 EFFECT_NAMES: list[str] = [e.name for e in ALL_EFFECTS]

@@ -23,11 +23,12 @@ import re
 import time
 import json
 import threading
+import traceback
 from pathlib import Path
 
 import numpy as np
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QObject, QSettings
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QObject, QSettings, QSize
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction, QDesktopServices, QMovie
 from PySide6.QtWidgets import (
@@ -47,7 +48,11 @@ from renderer import (
     blank_frame, logical_to_physical,
     ROWS, COLS, PHYSICAL_LED_COUNT,
 )
-from effects import make_effect, EFFECT_NAMES, ALL_EFFECTS, AudioVisualizer, TypingEffect, BaseEffect
+from effects import (
+    make_effect, EFFECT_NAMES, ALL_EFFECTS, AudioVisualizer,
+    SpectrumAudioVisualizer, TypingEffect, BaseEffect,
+    AUDIO_VISUALIZERS,
+)
 from paint import PaintEditor
 from preview import MatrixPreview
 
@@ -66,6 +71,22 @@ TICK_MS  = 1000 // TICK_HZ
 PRESET_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "PolyWollyWin" / "presets"
 PRESET_DIR.mkdir(parents=True, exist_ok=True)
 
+LOG_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "PolyWollyWin" / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+STARTUP_CRASH_LOG = LOG_DIR / "startup_crash.log"
+
+
+def _write_startup_crash_log(exc_type, exc_value, exc_tb) -> str:
+    """Write a full startup traceback and return the log path."""
+    details = "".join(
+        traceback.format_exception(exc_type, exc_value, exc_tb)
+    )
+    try:
+        STARTUP_CRASH_LOG.write_text(details, encoding="utf-8")
+    except Exception:
+        pass
+    return str(STARTUP_CRASH_LOG)
+
 # ─────────────────────────────────────────────────────────────────────
 # Preset manager  (JSON files, not registry)
 # ─────────────────────────────────────────────────────────────────────
@@ -76,7 +97,9 @@ class PresetManager:
     %LOCALAPPDATA%/PolyWollyWin/presets/.
 
     Preset schema:
-      { "name": str, "effect": str, "params": {attr: value}, "brightness": int, "contrast": int }
+      { "name": str, "effect": str, "params": {attr: value},
+        "blend_effect": str, "blend_params": {attr: value}, "blend_alpha": int,
+        "brightness": int, "contrast": int }
     """
 
     def __init__(self, directory: Path = PRESET_DIR):
@@ -215,7 +238,31 @@ class StartupSplash(QWidget):
         self.subtitle = QLabel("Initializing...")
         self.subtitle.setObjectName("SplashSubtitle")
         self.subtitle.setAlignment(Qt.AlignCenter)
+        self.subtitle.setWordWrap(True)
         lay.addWidget(self.subtitle)
+
+        self.error_details = QLabel("")
+        self.error_details.setWordWrap(True)
+        self.error_details.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.error_details.setStyleSheet(
+            "color:#ff8a8a; font-family:Consolas; font-size:10px; "
+            "background:#180608; border:1px solid #4a1118; "
+            "border-radius:6px; padding:8px;"
+        )
+        self.error_details.hide()
+        lay.addWidget(self.error_details)
+
+        self.error_buttons = QHBoxLayout()
+        self.copy_error_btn = QPushButton("Copy Error")
+        self.exit_btn = QPushButton("Exit")
+        self.copy_error_btn.clicked.connect(self._copy_error)
+        self.exit_btn.clicked.connect(QApplication.quit)
+        self.copy_error_btn.hide()
+        self.exit_btn.hide()
+        self.error_buttons.addStretch()
+        self.error_buttons.addWidget(self.copy_error_btn)
+        self.error_buttons.addWidget(self.exit_btn)
+        lay.addLayout(self.error_buttons)
 
         self.bar = QProgressBar()
         self.bar.setRange(0, 100)
@@ -244,6 +291,57 @@ class StartupSplash(QWidget):
         self.bar.setValue(100)
         QApplication.processEvents()
         QTimer.singleShot(ms, self._finish)
+
+    def show_error(self, exc: BaseException, log_path: str):
+        """Turn the splash into a persistent startup error screen."""
+        if self._movie is not None:
+            self._movie.stop()
+
+        self.title.setText("PolyWollyWin Failed to Start")
+        self.title.setStyleSheet(
+            "color:#ff5f6d; font-size:20px; font-weight:700;"
+        )
+
+        error_code = type(exc).__name__
+        error_message = str(exc).strip() or "No error message was provided."
+        summary = f"{error_code}: {error_message}"
+
+        self.subtitle.setText(
+            "Startup stopped before PolyWollyWin was ready."
+        )
+        self.error_details.setText(
+            f"{summary}\n\nFull traceback:\n{log_path}"
+        )
+        self.error_details.show()
+
+        self.bar.setRange(0, 100)
+        self.bar.setValue(100)
+        self.bar.setStyleSheet("""
+            QProgressBar {
+                min-height:14px;
+                max-height:14px;
+                border:1px solid #4a1118;
+                border-radius:7px;
+                background:#171717;
+            }
+            QProgressBar::chunk {
+                background:#b00020;
+                border-radius:6px;
+            }
+        """)
+
+        self.copy_error_btn.show()
+        self.exit_btn.show()
+        self.resize(500, 500)
+        self.center_on_screen()
+        self.raise_()
+        self.activateWindow()
+        QApplication.processEvents()
+
+    def _copy_error(self):
+        QApplication.clipboard().setText(
+            self.error_details.text()
+        )
 
     def _finish(self):
         if self._movie is not None:
@@ -281,6 +379,32 @@ class Settings:
     def get_audio_boost(self)       -> int: return int(self._s.value("audio_boost", 1800))
     def get_audio_falloff(self)     -> int: return int(self._s.value("audio_falloff", 80))
     def get_audio_floor(self)       -> int: return int(self._s.value("audio_floor", 8))
+    def get_audio_visualizer(self) -> str:
+        return str(self._s.value("audio_visualizer", "Oscilloscope"))
+
+    def get_audio_defaults(self) -> dict:
+        try:
+            raw = str(self._s.value("audio_defaults", "{}"))
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def get_audio_mode_defaults(self, name: str) -> dict:
+        data = self.get_audio_defaults().get(name, {})
+        return data if isinstance(data, dict) else {}
+
+    def get_effect_defaults(self) -> dict:
+        try:
+            raw = str(self._s.value("effect_defaults", "{}"))
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def get_effect_default(self, name: str) -> dict:
+        data = self.get_effect_defaults().get(name, {})
+        return data if isinstance(data, dict) else {}
 
     def set_effect_speed(self, v: float): self._s.setValue("effect_speed", v)
     def set_brightness(self, v: int):     self._s.setValue("brightness", v)
@@ -302,6 +426,26 @@ class Settings:
     def set_audio_boost(self, v: int):       self._s.setValue("audio_boost", v)
     def set_audio_falloff(self, v: int):     self._s.setValue("audio_falloff", v)
     def set_audio_floor(self, v: int):       self._s.setValue("audio_floor", v)
+    def set_audio_visualizer(self, name: str):
+        self._s.setValue("audio_visualizer", name)
+
+    def set_audio_mode_defaults(self, name: str, values: dict):
+        data = self.get_audio_defaults()
+        data[name] = dict(values)
+        self._s.setValue("audio_defaults", json.dumps(data))
+        self._s.sync()
+
+    def set_effect_default(self, name: str, values: dict):
+        data = self.get_effect_defaults()
+        data[name] = dict(values)
+        self._s.setValue("effect_defaults", json.dumps(data))
+        self._s.sync()
+
+    def clear_effect_default(self, name: str):
+        data = self.get_effect_defaults()
+        data.pop(name, None)
+        self._s.setValue("effect_defaults", json.dumps(data))
+        self._s.sync()
 
     def save_all(self): self._s.sync()
     def clear(self):    self._s.clear(); self._s.sync()
@@ -310,6 +454,33 @@ class Settings:
 # ─────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────
+
+def _effect_class(name: str):
+    for cls in ALL_EFFECTS:
+        if cls.name == name:
+            return cls
+    return None
+
+
+def _runtime_effect_values(name: str, raw_values: dict | None) -> dict:
+    """Convert ParamPanel raw slider values into effect constructor values."""
+    cls = _effect_class(name)
+    if cls is None or not raw_values:
+        return {}
+
+    params = dict(getattr(cls, "PARAMS", {}) or {})
+    out = {}
+    for attr, raw in raw_values.items():
+        spec = params.get(attr)
+        if spec is None:
+            continue
+        if spec.get("type") == "text":
+            out[attr] = str(raw)
+        else:
+            scale = float(spec.get("scale", 1.0))
+            out[attr] = float(raw) / scale
+    return out
+
 
 def _resource_path(relative: str) -> Path:
     """Resolve an asset in source and PyInstaller one-file builds."""
@@ -679,9 +850,10 @@ class ParamPanel(QGroupBox):
     - Presets still save the same raw values as before.
     """
 
-    def __init__(self, driver: "MatrixDriver", parent=None):
+    def __init__(self, driver: "MatrixDriver", settings: "Settings", parent=None):
         super().__init__("Effect Parameters", parent)
         self._driver = driver
+        self._settings = settings
         self._outer = QVBoxLayout(self)
         self._outer.setSpacing(8)
         self._outer.setContentsMargins(8, 8, 8, 8)
@@ -733,45 +905,89 @@ class ParamPanel(QGroupBox):
         lbl.setStyleSheet("color:#555; font-size:11px;")
         self._outer.addWidget(lbl)
 
-    def _icon_for(self, attr: str, label: str) -> str:
-        """
-        Flat single-color iconography.
+    _PARAM_ICON_MAP = {
+        "speed": "speed.svg",
+        "peak": "peak.svg",
+        "density": "density.svg",
+        "direction": "direction.svg",
+        "trail": "trail.svg",
+        "width": "width.svg",
+        "bounce": "bounce.svg",
+        "stars": "stars.svg",
+        "move x": "move_x.svg",
+        "bursts": "bursts.svg",
+        "waves": "waves.svg",
+        "format": "format_12_24h.svg",
+        "blink": "blink.svg",
+        "message": "message.svg",
+        "gap": "gap.svg",
+        "decay": "decay.svg",
+        "glow": "glow.svg",
+        "sensitivity": "sensitivity.svg",
+        "sensitivity trim": "sensitivity.svg",
+        "boost": "boost.svg",
+        "boost trim": "boost.svg",
+        "falloff": "falloff.svg",
+        "noise floor": "noise_floor.svg",
+        "intensity": "intensity.svg",
+        "cooling": "cooling.svg",
+        "flow": "flow.svg",
+        "blobs": "blobs.svg",
+        "radius": "radius.svg",
+        "bolts": "bolts.svg",
+        "fade": "fade.svg",
+        "rows": "rows.svg",
+        "x position": "move_x.svg",
+        "y position": "move_y.svg",
+    }
 
-        These are intentionally simple monochrome glyphs so the control strip
-        reads more like silhouettes than colorful emoji.
-        """
-        a = attr.lower()
-        l = label.lower()
+    def _icon_path_for(self, attr: str, label: str) -> Path | None:
+        """Return the canonical SVG asset for a numeric parameter."""
+        clean_label = label.strip().rstrip(":").strip().lower()
+        clean_attr = attr.strip().lower()
 
-        if "sensitivity" in a or "sensitivity" in l:
-            return "∿"
-        if "boost" in a or "boost" in l:
-            return "▲"
-        if a in ("x_pos", "x", "offset_x") or "x position" in l or "offset x" in l:
-            return "↔"
-        if a in ("y_pos", "y", "offset_y") or "y position" in l or "offset y" in l:
-            return "↕"
-        if "speed" in a or "speed" in l:
-            return "▶"
-        if "falloff" in a or "falloff" in l:
-            return "◒"
-        if "floor" in a or "floor" in l:
-            return "▁"
-        if "width" in a or "width" in l:
-            return "▮"
-        if "height" in a or "height" in l:
-            return "▯"
-        if "brightness" in a or "brightness" in l:
-            return "●"
-        if "contrast" in a or "contrast" in l:
-            return "◐"
-        if "alpha" in a or "blend" in a or "opacity" in l:
-            return "α"
-        if "phase" in a or "angle" in a:
-            return "θ"
-        if "count" in a or "amount" in a:
-            return "#"
-        return label[:1].upper() if label else "•"
+        # Labels distinguish shared attrs such as count = Stars/Bursts/Blobs.
+        filename = self._PARAM_ICON_MAP.get(clean_label)
+
+        if filename is None:
+            attr_fallbacks = {
+                "speed": "speed.svg",
+                "peak": "peak.svg",
+                "density": "density.svg",
+                "direction": "direction.svg",
+                "trail": "trail.svg",
+                "width": "width.svg",
+                "bounce": "bounce.svg",
+                "waves": "waves.svg",
+                "hour_24": "format_12_24h.svg",
+                "blink": "blink.svg",
+                "message": "message.svg",
+                "loop_gap": "gap.svg",
+                "decay": "decay.svg",
+                "glow": "glow.svg",
+                "sensitivity": "sensitivity.svg",
+                "boost": "boost.svg",
+                "falloff": "falloff.svg",
+                "floor": "noise_floor.svg",
+                "intensity": "intensity.svg",
+                "cooling": "cooling.svg",
+                "flow": "flow.svg",
+                "radius": "radius.svg",
+                "bolts": "bolts.svg",
+                "fade": "fade.svg",
+                "rows": "rows.svg",
+                "x_offset": "move_x.svg",
+                "x_pos": "move_x.svg",
+                "y_pos": "move_y.svg",
+            }
+            filename = attr_fallbacks.get(clean_attr)
+
+        if filename is None:
+            return None
+
+        path = _resource_path(f"assets/parameter_icons/{filename}")
+        return path if path.exists() else None
+
 
     def _fmt_value(self, raw_value: int, scale: float, display: dict | None = None) -> str:
         if display:
@@ -846,7 +1062,7 @@ class ParamPanel(QGroupBox):
             "QSlider::groove:horizontal{height:5px;background:#2b2b2b;border-radius:2px;}"
             "QSlider::sub-page:horizontal{background:#e8001d;border-radius:2px;}"
             "QSlider::add-page:horizontal{background:#3a3a3a;border-radius:2px;}"
-            "QSlider::handle:horizontal{background:#f2f2f2;border:2px solid #e8001d;"
+            "QSlider::handle:horizontal{background:#7a0010;border:2px solid #e8001d;"
             "width:18px;height:18px;margin:-8px 0;border-radius:9px;}"
         )
         self._active_slider.valueChanged.connect(self._active_slider_changed)
@@ -946,10 +1162,25 @@ class ParamPanel(QGroupBox):
                 if attr == self._active_attr:
                     self._select_numeric(attr)
 
+    def _save_current_default(self):
+        if self._effect_cls is None:
+            return
+        self._settings.set_effect_default(
+            self._effect_cls.name, self.get_values()
+        )
+
+    def _clear_current_default(self):
+        if self._effect_cls is None:
+            return
+        self._settings.clear_effect_default(self._effect_cls.name)
+        self._reset_current()
+
     def load(self, effect_cls: type[BaseEffect], saved_vals: dict | None = None):
         self._clear()
         self._effect_cls = effect_cls
         self._params = dict(getattr(effect_cls, "PARAMS", {}) or {})
+        if saved_vals is None:
+            saved_vals = self._settings.get_effect_default(effect_cls.name)
 
         params = self._params
         if not params:
@@ -960,18 +1191,29 @@ class ParamPanel(QGroupBox):
         title = QLabel(effect_cls.name)
         title.setStyleSheet("color:#e8001d;font-size:12px;font-weight:bold;")
 
+        save_btn = QPushButton("✓")
+        save_btn.setToolTip("Save these values as this effect's default")
+        save_btn.setFixedSize(28, 28)
+        save_btn.setStyleSheet(
+            "QPushButton{background:#191919;color:#8fd694;border:1px solid #333;"
+            "border-radius:14px;font-size:14px;padding:0;}"
+            "QPushButton:hover{color:#fff;border-color:#47b45a;}"
+        )
+        save_btn.clicked.connect(self._save_current_default)
+
         reset_btn = QPushButton("↺")
-        reset_btn.setToolTip("Reset this effect")
+        reset_btn.setToolTip("Restore factory defaults and clear saved default")
         reset_btn.setFixedSize(28, 28)
         reset_btn.setStyleSheet(
             "QPushButton{background:#191919;color:#888;border:1px solid #333;"
             "border-radius:14px;font-size:15px;padding:0;}"
             "QPushButton:hover{color:#fff;border-color:#e8001d;}"
         )
-        reset_btn.clicked.connect(self._reset_current)
+        reset_btn.clicked.connect(self._clear_current_default)
 
         header.addWidget(title)
         header.addStretch()
+        header.addWidget(save_btn)
         header.addWidget(reset_btn)
         self._outer.addLayout(header)
 
@@ -1014,8 +1256,16 @@ class ParamPanel(QGroupBox):
             btn = QPushButton()
             btn.setCheckable(True)
             btn.setStyleSheet(self._circle_style())
-            icon = self._icon_for(attr, label)
-            btn.setText(icon)
+
+            icon_path = self._icon_path_for(attr, label)
+            if icon_path is not None:
+                btn.setIcon(QIcon(str(icon_path)))
+                btn.setIconSize(QSize(24, 24))
+                btn.setText("")
+            else:
+                # Last-resort fallback for future parameters without an asset.
+                btn.setText("•")
+
             btn.setToolTip(label)
             self._buttons[attr] = btn
 
@@ -1187,11 +1437,15 @@ class MatrixDriver(QObject):
     def set_gif_speed(self, v: float):
         with self._lock: self._gif_speed = max(0.1, min(10.0, v))
 
-    def set_blend_effect(self, name: str | None):
+    def set_blend_effect(self, name: str | None, params: dict | None = None):
         with self._lock:
             if isinstance(self._effect2, (AudioVisualizer, TypingEffect)):
                 self._effect2.stop()
             self._effect2 = make_effect(name) if name else None
+            if self._effect2:
+                for attr, value in (params or {}).items():
+                    if hasattr(self._effect2, attr):
+                        setattr(self._effect2, attr, value)
 
     def set_blend_alpha(self, v: float):
         with self._lock: self._blend_alpha = max(0.0, min(1.0, v))
@@ -1236,7 +1490,7 @@ class MatrixDriver(QObject):
             self._effect = None
             self._effect2 = None
 
-    def set_mode_effect(self, name: str):
+    def set_mode_effect(self, name: str, params: dict | None = None):
         with self._lock:
             if isinstance(self._effect, (AudioVisualizer, TypingEffect)):
                 self._effect.stop()
@@ -1245,21 +1499,61 @@ class MatrixDriver(QObject):
                 self._audio = None
             self._maybe_start_xfade()
             self._effect = make_effect(name)
+            for attr, value in (params or {}).items():
+                if hasattr(self._effect, attr):
+                    setattr(self._effect, attr, value)
             self.mode = self.MODE_EFFECT
 
-    def set_mode_audio(self, sensitivity: float = 9.0, boost: float = 18.0, falloff: float = 0.80, floor: float = 0.0008):
+    def set_mode_audio(self, visualizer: str = "Spectrum Bars",
+                       sensitivity: float = 1.0,
+                       falloff: float = 0.82,
+                       extra: dict | None = None):
         with self._lock:
             if isinstance(self._effect, (AudioVisualizer, TypingEffect)):
                 self._effect.stop()
             self._effect = None
             self._effect2 = None
-            if self._audio is None:
-                self._audio = AudioVisualizer(sensitivity=sensitivity, boost=boost, falloff=falloff, floor=floor)
+
+            cls = AUDIO_VISUALIZERS.get(
+                visualizer, SpectrumAudioVisualizer
+            )
+            needs_new = (
+                self._audio is None or type(self._audio) is not cls
+            )
+
+            if needs_new:
+                if self._audio:
+                    self._audio.stop()
+
+                if cls.__name__ == "KITTAudioEffect":
+                    self._audio = cls(
+                        sensitivity=sensitivity,
+                        boost=1.0,
+                        x_pos=(extra or {}).get("x_pos", 66.0),
+                        y_pos=(extra or {}).get("y_pos", 45.0),
+                        style=(extra or {}).get("style", 0.0),
+                    )
+                    self._audio.falloff = falloff
+                else:
+                    self._audio = cls(
+                        sensitivity=sensitivity,
+                        falloff=falloff,
+                        **(extra or {}),
+                    )
             else:
-                self._audio.sensitivity = sensitivity
-                self._audio.boost = boost
-                self._audio.falloff = falloff
-                self._audio.floor = floor
+                if hasattr(self._audio, "apply_controls"):
+                    self._audio.apply_controls(
+                        sensitivity=sensitivity,
+                        falloff=falloff,
+                        **(extra or {}),
+                    )
+                else:
+                    self._audio.sensitivity = sensitivity
+                    self._audio.falloff = falloff
+                    for attr, value in (extra or {}).items():
+                        if hasattr(self._audio, attr):
+                            setattr(self._audio, attr, value)
+
             self._maybe_start_xfade()
             self.mode = self.MODE_AUDIO
 
@@ -1785,56 +2079,105 @@ class GifTab(QWidget):
 # ─────────────────────────────────────────────────────────────────────
 
 class AudioTab(QWidget):
-    """Dedicated audio visualizer input tab with live controls."""
+    """Dedicated audio visualizations with per-mode saved controls."""
+
+    XY_POSITIONED = {
+        "KITT / KARR",
+        "Center Starburst",
+        "Corner Convergence",
+    }
+    Y_ONLY = {"Oscilloscope"}
 
     def __init__(self, driver: MatrixDriver, settings: "Settings" = None):
         super().__init__()
         self._driver = driver
-        self._settings = settings
+        self._settings = settings or Settings()
+        self._loading = False
+        self._previous_type = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        title = QLabel("Audio Visualizer")
-        title.setStyleSheet("color:#e8001d; font-size:13px; font-weight:bold;")
+        title = QLabel("Audio Visualizations")
+        title.setStyleSheet(
+            "color:#e8001d; font-size:13px; font-weight:bold;"
+        )
         layout.addWidget(title)
 
-        help_lbl = QLabel("System-audio loopback first, mic fallback if loopback is unavailable. Idle wave means no usable audio capture yet.")
-        help_lbl.setWordWrap(True)
-        help_lbl.setStyleSheet("color:#666; font-size:10px;")
-        layout.addWidget(help_lbl)
+        row = QHBoxLayout()
+        row.addWidget(_label("Visualization"))
+        self._type = QComboBox()
+        self._type.addItems(AUDIO_VISUALIZERS.keys())
+        row.addWidget(self._type, 1)
+        layout.addLayout(row)
 
-        ctrl_row = QHBoxLayout(); ctrl_row.setSpacing(6)
-        self._start_btn = QPushButton("▶ Start Audio")
-        self._start_btn.setMinimumHeight(32)
-        self._start_btn.clicked.connect(self.start)
-        stop_btn = QPushButton("⬛ Stop / Blank")
-        stop_btn.setMinimumHeight(32)
-        stop_btn.clicked.connect(driver.set_mode_blank)
-        ctrl_row.addWidget(self._start_btn)
-        ctrl_row.addWidget(stop_btn)
-        layout.addLayout(ctrl_row)
-
-        group = QGroupBox("Audio Parameters")
-        grid = QGridLayout(group)
+        response = QGroupBox("Response")
+        grid = QGridLayout(response)
         grid.setSpacing(6)
         grid.setColumnStretch(1, 1)
+        self._sens, self._sens_val = self._slider(
+            grid, 0, "Sensitivity", 20, 400, 100, 100.0, "{:.2f}×"
+        )
+        self._fall, self._fall_val = self._slider(
+            grid, 1, "Falloff", 50, 98, 82, 100.0, "{:.2f}"
+        )
+        layout.addWidget(response)
 
-        self._sens, self._sens_val = self._slider(grid, 0, "Sensitivity", 100, 3000, 900, 100.0, "{:.1f}×")
-        self._boost, self._boost_val = self._slider(grid, 1, "Boost", 100, 5000, 1800, 100.0, "{:.1f}×")
-        self._fall, self._fall_val = self._slider(grid, 2, "Falloff", 50, 98, 80, 100.0, "{:.2f}")
-        self._floor, self._floor_val = self._slider(grid, 3, "Noise Floor", 1, 100, 8, 10000.0, "{:.4f}")
+        self._position_group = QGroupBox("Position")
+        pos_grid = QGridLayout(self._position_group)
+        self._x_label = _label("X Position")
+        self._x = QSlider(Qt.Horizontal)
+        self._x.setRange(0, 100)
+        self._x_val = QLabel("50")
+        self._x_val.setFixedWidth(40)
+        self._y_label = _label("Y Position")
+        self._y = QSlider(Qt.Horizontal)
+        self._y.setRange(0, 100)
+        self._y_val = QLabel("50")
+        self._y_val.setFixedWidth(40)
+        pos_grid.addWidget(self._x_label, 0, 0)
+        pos_grid.addWidget(self._x, 0, 1)
+        pos_grid.addWidget(self._x_val, 0, 2)
+        pos_grid.addWidget(self._y_label, 1, 0)
+        pos_grid.addWidget(self._y, 1, 1)
+        pos_grid.addWidget(self._y_val, 1, 2)
+        layout.addWidget(self._position_group)
 
-        for sld in (self._sens, self._boost, self._fall, self._floor):
-            sld.valueChanged.connect(self._push_params)
+        self._kitt_group = QGroupBox("KITT / KARR")
+        kitt_grid = QGridLayout(self._kitt_group)
+        self._kitt_style = KittKarrSwitch(0)
+        kitt_grid.addWidget(self._kitt_style, 0, 0, Qt.AlignLeft)
+        layout.addWidget(self._kitt_group)
 
-        layout.addWidget(group)
+        buttons = QHBoxLayout()
+        start_btn = QPushButton("▶ Start Audio")
+        start_btn.clicked.connect(self.start)
+        stop_btn = QPushButton("■ Stop")
+        stop_btn.clicked.connect(self._stop)
+        buttons.addWidget(start_btn)
+        buttons.addWidget(stop_btn)
+        layout.addLayout(buttons)
 
         self._status = QLabel("Stopped")
         self._status.setStyleSheet("color:#555; font-size:11px;")
         layout.addWidget(self._status)
         layout.addStretch()
+
+        self._x.valueChanged.connect(lambda v: self._x_val.setText(str(v)))
+        self._y.valueChanged.connect(lambda v: self._y_val.setText(str(v)))
+        self._sens.valueChanged.connect(self._control_changed)
+        self._fall.valueChanged.connect(self._control_changed)
+        self._x.valueChanged.connect(self._control_changed)
+        self._y.valueChanged.connect(self._control_changed)
+        self._kitt_style.valueChanged.connect(self._control_changed)
+        self._type.currentTextChanged.connect(self._visualizer_changed)
+
+        selected = self._settings.get_audio_visualizer()
+        if selected not in AUDIO_VISUALIZERS:
+            selected = "Oscilloscope"
+        self._type.setCurrentText(selected)
+        self._visualizer_changed(selected)
 
     def _slider(self, grid, row, label, lo, hi, default, scale, fmt):
         lbl = _label(label)
@@ -1842,46 +2185,125 @@ class AudioTab(QWidget):
         sld.setRange(lo, hi)
         sld.setValue(default)
         val = QLabel(fmt.format(default / scale))
-        val.setFixedWidth(48)
+        val.setFixedWidth(52)
         val.setStyleSheet("color:#ccc; font-size:11px;")
-        sld.valueChanged.connect(lambda v, l=val, sc=scale, f=fmt: l.setText(f.format(v / sc)))
+        sld.valueChanged.connect(
+            lambda v, l=val, sc=scale, f=fmt:
+                l.setText(f.format(v / sc))
+        )
         grid.addWidget(lbl, row, 0)
         grid.addWidget(sld, row, 1)
         grid.addWidget(val, row, 2)
         return sld, val
 
-    def _values(self):
-        return (
-            self._sens.value() / 100.0,
-            self._boost.value() / 100.0,
-            self._fall.value() / 100.0,
-            self._floor.value() / 10000.0,
-        )
+    def _current_values(self) -> dict:
+        values = {
+            "sensitivity": self._sens.value(),
+            "falloff": self._fall.value(),
+        }
+        name = self._type.currentText()
+        if name in self.XY_POSITIONED:
+            values["x_pos"] = self._x.value()
+            values["y_pos"] = self._y.value()
+        elif name in self.Y_ONLY:
+            values["y_pos"] = self._y.value()
+        if name == "KITT / KARR":
+            values["style"] = self._kitt_style.value()
+        return values
 
-    def _push_params(self):
-        sensitivity, boost, falloff, floor = self._values()
-        self._driver.set_audio_param("sensitivity", sensitivity)
-        self._driver.set_audio_param("boost", boost)
-        self._driver.set_audio_param("falloff", falloff)
-        self._driver.set_audio_param("floor", floor)
+    def _save_current_mode(self, name: str | None = None):
+        name = name or self._type.currentText()
+        if not name or self._loading:
+            return
+        self._settings.set_audio_visualizer(name)
+        self._settings.set_audio_mode_defaults(name, self._current_values())
+
+    def _load_mode(self, name: str):
+        defaults = {
+            "sensitivity": 100,
+            "falloff": 82,
+            "x_pos": 66 if name == "KITT / KARR" else 50,
+            "y_pos": 45 if name == "KITT / KARR" else 50,
+            "style": 0,
+        }
+        defaults.update(self._settings.get_audio_mode_defaults(name))
+
+        self._loading = True
+        try:
+            self._sens.setValue(int(defaults["sensitivity"]))
+            self._fall.setValue(int(defaults["falloff"]))
+            self._x.setValue(int(defaults["x_pos"]))
+            self._y.setValue(int(defaults["y_pos"]))
+            self._kitt_style.setValue(int(defaults["style"]), emit=False)
+        finally:
+            self._loading = False
+
+    def _visualizer_changed(self, name: str):
+        if self._previous_type and self._previous_type != name:
+            self._save_current_mode(self._previous_type)
+        self._previous_type = name
+        self._load_mode(name)
+
+        is_kitt = name == "KITT / KARR"
+        xy = name in self.XY_POSITIONED
+        y_only = name in self.Y_ONLY
+        self._kitt_group.setVisible(is_kitt)
+        self._position_group.setVisible(xy or y_only)
+        self._x_label.setVisible(xy)
+        self._x.setVisible(xy)
+        self._x_val.setVisible(xy)
+        self._y_label.setVisible(xy or y_only)
+        self._y.setVisible(xy or y_only)
+        self._y_val.setVisible(xy or y_only)
+        self._settings.set_audio_visualizer(name)
+
+        if self._driver.mode == self._driver.MODE_AUDIO:
+            self.start()
+
+    def _extra(self):
+        name = self._type.currentText()
+        extra = {}
+        if name in self.XY_POSITIONED:
+            extra.update(x_pos=float(self._x.value()), y_pos=float(self._y.value()))
+        elif name in self.Y_ONLY:
+            extra["y_pos"] = float(self._y.value())
+        if name == "KITT / KARR":
+            extra["style"] = float(self._kitt_style.value())
+        return extra
+
+    def _control_changed(self, *_args):
+        if self._loading:
+            return
+        self._save_current_mode()
+        if self._driver.mode == self._driver.MODE_AUDIO:
+            self.start()
 
     def start(self):
-        sensitivity, boost, falloff, floor = self._values()
-        self._driver.set_mode_audio(sensitivity, boost, falloff, floor)
-        self._status.setText("Running")
+        name = self._type.currentText()
+        self._save_current_mode(name)
+        self._driver.set_mode_audio(
+            name,
+            self._sens.value() / 100.0,
+            self._fall.value() / 100.0,
+            self._extra(),
+        )
+        self._status.setText(f"Running: {name}")
         self._status.setStyleSheet("color:#e8001d; font-size:11px;")
 
+    def _stop(self):
+        self._save_current_mode()
+        self._driver.set_mode_blank()
+        self._status.setText("Stopped")
+        self._status.setStyleSheet("color:#555; font-size:11px;")
+
     def restore(self, settings: "Settings"):
-        self._sens.setValue(settings.get_audio_sensitivity())
-        self._boost.setValue(settings.get_audio_boost())
-        self._fall.setValue(settings.get_audio_falloff())
-        self._floor.setValue(settings.get_audio_floor())
+        selected = settings.get_audio_visualizer()
+        if selected in AUDIO_VISUALIZERS:
+            self._type.setCurrentText(selected)
+            self._load_mode(selected)
 
     def save(self, settings: "Settings"):
-        settings.set_audio_sensitivity(self._sens.value())
-        settings.set_audio_boost(self._boost.value())
-        settings.set_audio_falloff(self._fall.value())
-        settings.set_audio_floor(self._floor.value())
+        self._save_current_mode()
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -1901,12 +2323,14 @@ class PresetPanel(QWidget):
     preset_activated = Signal(dict)   # emits the preset dict when applied
 
     def __init__(self, driver: "MatrixDriver", param_panel: "ParamPanel",
-                 bc_bar: "BCBar", settings: "Settings", parent=None):
+                 bc_bar: "BCBar", settings: "Settings",
+                 owner: "ControlWindow" = None, parent=None):
         super().__init__(parent)
         self._driver      = driver
         self._param_panel = param_panel
         self._bc          = bc_bar
         self._settings    = settings
+        self._owner       = owner
         self._mgr         = PresetManager()
 
         layout = QVBoxLayout(self)
@@ -1990,12 +2414,20 @@ class PresetPanel(QWidget):
         name, ok = QInputDialog.getText(self, "Save Preset", "Preset name:")
         if not ok or not name.strip():
             return
+        blend_state = (
+            self._owner._get_blend_preset_state()
+            if self._owner is not None
+            else {"effect": "", "params": {}, "alpha": 0}
+        )
         preset = {
-            "name":       name.strip(),
-            "effect":     effect,
-            "params":     self._param_panel.get_values(),
-            "brightness": self._bc.bri.value(),
-            "contrast":   self._bc.con.value(),
+            "name":         name.strip(),
+            "effect":       effect,
+            "params":       self._param_panel.get_values(),
+            "blend_effect": blend_state.get("effect", ""),
+            "blend_params": blend_state.get("params", {}),
+            "blend_alpha":  int(blend_state.get("alpha", 0)),
+            "brightness":   self._bc.bri.value(),
+            "contrast":     self._bc.con.value(),
         }
         self._mgr.save(preset)
         self._refresh_list()
@@ -2005,35 +2437,49 @@ class PresetPanel(QWidget):
 
     def _load_selected(self):
         p = self._selected_preset()
-        if not p:
+        if p:
+            self.apply_preset(p)
+
+    def apply_preset(self, p: dict):
+        """Apply a complete preset from either the Presets tab or tray menu."""
+        if not isinstance(p, dict):
             return
-        effect = p.get("effect", "")
+
+        effect = str(p.get("effect", "") or "")
         params = p.get("params", {})
-        bri    = p.get("brightness", 100)
-        con    = p.get("contrast",   100)
+        if not isinstance(params, dict):
+            params = {}
 
-        # Apply brightness / contrast
-        self._bc.bri.setValue(int(bri))
-        self._bc.con.setValue(int(con))
+        bri = max(0, min(100, int(p.get("brightness", 100))))
+        con = max(0, min(200, int(p.get("contrast", 100))))
 
-        # Launch the effect with saved params
-        self._driver.set_mode_effect(effect)
-        saved = {}
-        for cls in ALL_EFFECTS:
-            if cls.name == effect:
-                self._param_panel.load(cls, saved_vals=params)
-                # Apply each param to the live effect
-                for attr, p_spec in cls.PARAMS.items():
-                    if attr in params:
-                        val = params[attr]
-                        if p_spec.get("type") == "text":
-                            self._driver.set_effect_param(attr, str(val))
-                        else:
-                            scale = float(p_spec["scale"])
-                            self._driver.set_effect_param(attr, int(val) / scale)
-                break
+        # Apply brightness and contrast through the real controls so labels,
+        # settings, and the running driver all stay synchronized.
+        self._bc.bri.setValue(bri)
+        self._bc.con.setValue(con)
 
-        self._status.setText(f"Loaded: {p.get('name')}")
+        if effect:
+            runtime_params = _runtime_effect_values(effect, params)
+            self._driver.set_mode_effect(effect, runtime_params)
+
+            for cls in ALL_EFFECTS:
+                if cls.name == effect:
+                    self._param_panel.load(cls, saved_vals=params)
+                    break
+
+            # Keep the main effect UI and persistence aligned with the preset.
+            if self._owner is not None:
+                self._owner._settings.set_last_effect(effect)
+
+        # Restore Layer B, its exact settings, and A/B mix.
+        if self._owner is not None:
+            self._owner._apply_blend_preset_state({
+                "effect": p.get("blend_effect", ""),
+                "params": p.get("blend_params", {}),
+                "alpha": int(p.get("blend_alpha", 0)),
+            })
+
+        self._status.setText(f"Loaded: {p.get('name', '?')}")
         self.preset_activated.emit(p)
 
     # ── delete ────────────────────────────────────────────────────────
@@ -2117,8 +2563,9 @@ class ControlWindow(QWidget):
         self._seq_tab = SequencerTab(driver, self._param_panel)
 
         # Presets tab
-        self._preset_panel = PresetPanel(driver, self._param_panel,
-                                          self._bc, self._settings)
+        self._preset_panel = PresetPanel(
+            driver, self._param_panel, self._bc, self._settings, owner=self
+        )
 
         tabs = QTabWidget()
         tabs.addTab(effects_tab_widget, "Effects")
@@ -2270,8 +2717,8 @@ class ControlWindow(QWidget):
         blend_sld_row.addWidget(_label("Mix"))
         self._blend_sld = QSlider(Qt.Horizontal)
         self._blend_sld.setRange(0, 100); self._blend_sld.setValue(0)
-        self._blend_val = QLabel("A 100%")
-        self._blend_val.setFixedWidth(52)
+        self._blend_val = QLabel("A 100% / B 0%")
+        self._blend_val.setFixedWidth(96)
         self._blend_val.setStyleSheet("color:#ccc; font-size:11px;")
         self._blend_sld.valueChanged.connect(self._on_blend_slider)
         blend_sld_row.addWidget(self._blend_sld)
@@ -2282,7 +2729,7 @@ class ControlWindow(QWidget):
         layout.addWidget(_sep())
 
         # ── Per-effect parameter panel ─────────────────────────────────
-        self._param_panel = ParamPanel(self._driver)
+        self._param_panel = ParamPanel(self._driver, self._settings)
         layout.addWidget(self._param_panel)
 
         layout.addWidget(_sep())
@@ -2292,14 +2739,8 @@ class ControlWindow(QWidget):
         btn_grid  = QGridLayout(); btn_grid.setSpacing(6)
         COLS_UI   = 3
 
-        blank_btn = QPushButton("⬛ Blank")
-        blank_btn.clicked.connect(self._driver.set_mode_blank)
-        blank_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        blank_btn.setMinimumHeight(30)
-        btn_grid.addWidget(blank_btn, 0, 0, 1, COLS_UI * 2 - 1)
-
         for i, name in enumerate(EFFECT_NAMES):
-            row  = (i // COLS_UI) + 1
+            row  = i // COLS_UI
             col  = (i % COLS_UI) * 2
             ccol = col + 1
 
@@ -2320,24 +2761,34 @@ class ControlWindow(QWidget):
             btn_grid.setColumnStretch(c * 2, 1)
             btn_grid.setColumnStretch(c * 2 + 1, 0)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea{border:none;}")
+        self._effect_scroll = QScrollArea()
+        self._effect_scroll.setWidgetResizable(True)
+        self._effect_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._effect_scroll.setStyleSheet("QScrollArea{border:none;}")
         btn_w = QWidget()
         btn_w.setLayout(btn_grid)
-        scroll.setWidget(btn_w)
-        layout.addWidget(scroll)
+        self._effect_scroll.setWidget(btn_w)
+        layout.addWidget(self._effect_scroll)
 
         return w
 
     def _launch_effect(self, name: str):
-        """Click an effect button — starts effect AND loads its param sliders."""
-        self._driver.set_mode_effect(name)
+        """Start an effect without moving the effect-list scroll position."""
+        scroll_bar = self._effect_scroll.verticalScrollBar()
+        saved_scroll = scroll_bar.value()
+
+        raw_defaults = self._settings.get_effect_default(name)
+        self._driver.set_mode_effect(
+            name, _runtime_effect_values(name, raw_defaults)
+        )
         for cls in ALL_EFFECTS:
             if cls.name == name:
-                self._param_panel.load(cls)
+                self._param_panel.load(cls, raw_defaults)
                 break
+
+        # ParamPanel.load() rebuilds widgets and can cause Qt to reveal the
+        # newly focused control, which used to jump the effect list to the top.
+        QTimer.singleShot(0, lambda v=saved_scroll: scroll_bar.setValue(v))
 
     def _paint_tab(self) -> QWidget:
         w      = QWidget()
@@ -2375,13 +2826,17 @@ class ControlWindow(QWidget):
             self._blend_clear()
 
     def _on_blend_slider(self, v: int):
-        self._blend_val.setText(f"A {100-v}%" if v < 100 else "B 100%")
+        self._blend_val.setText(f"A {100-v}% / B {v}%")
         self._driver.set_blend_alpha(v / 100.0)
 
-    def _set_blend_effect(self, name: str):
+    def _set_blend_effect(self, name: str, raw_params: dict | None = None):
         self._blend_label.setText(name)
         self._blend_label.setStyleSheet("color:#e8001d; font-size:11px;")
-        self._driver.set_blend_effect(name)
+        if raw_params is None:
+            raw_params = self._settings.get_effect_default(name)
+        self._driver.set_blend_effect(
+            name, _runtime_effect_values(name, raw_params)
+        )
 
     def _blend_clear(self):
         self._blend_label.setText("(none)")
@@ -2390,6 +2845,37 @@ class ControlWindow(QWidget):
         self._driver.set_blend_effect(None)
         for cb in self._blend_checks.values():
             cb.blockSignals(True); cb.setChecked(False); cb.blockSignals(False)
+
+    def _get_blend_preset_state(self) -> dict:
+        """Capture Layer B, its raw saved values, and the exact mix."""
+        name = self._blend_label.text()
+        if name == "(none)":
+            name = ""
+        params = self._settings.get_effect_default(name) if name else {}
+        return {
+            "effect": name,
+            "params": dict(params),
+            "alpha": int(self._blend_sld.value()),
+        }
+
+    def _apply_blend_preset_state(self, state: dict):
+        """Apply Layer B, its exact parameters, and the saved mix."""
+        name = str(state.get("effect", "") or "")
+        raw_params = state.get("params", {})
+        if not isinstance(raw_params, dict):
+            raw_params = {}
+        alpha = max(0, min(100, int(state.get("alpha", 0))))
+
+        if name and name in self._blend_checks:
+            self._set_blend_effect(name, raw_params)
+            for effect_name, cb in self._blend_checks.items():
+                cb.blockSignals(True)
+                cb.setChecked(effect_name == name)
+                cb.blockSignals(False)
+            self._blend_sld.setValue(alpha)
+            self._driver.set_blend_alpha(alpha / 100.0)
+        else:
+            self._blend_clear()
 
     def _restore_blend(self):
         """Restore saved Layer B + mix slider without triggering checkbox side effects."""
@@ -2403,6 +2889,7 @@ class ControlWindow(QWidget):
                 cb.setChecked(n == name)
                 cb.blockSignals(False)
             self._blend_sld.setValue(alpha)
+            self._driver.set_blend_alpha(alpha / 100.0)
         else:
             self._blend_clear()
 
@@ -2506,10 +2993,13 @@ class ControlWindow(QWidget):
         if mode.startswith("effect:"):
             try:
                 n = mode[7:]
-                self._driver.set_mode_effect(n)
+                raw_defaults = self._settings.get_effect_default(n)
+                self._driver.set_mode_effect(
+                    n, _runtime_effect_values(n, raw_defaults)
+                )
                 for cls in ALL_EFFECTS:
                     if cls.name == n:
-                        self._param_panel.load(cls)
+                        self._param_panel.load(cls, raw_defaults)
                         break
             except Exception:
                 pass
@@ -2592,6 +3082,7 @@ class TrayApp(QSystemTrayIcon):
 
         preset_menu = menu.addMenu("Presets")
         self._preset_menu = preset_menu
+        self._preset_menu.aboutToShow.connect(self._refresh_preset_menu)
         self._refresh_preset_menu()
 
         menu.addSeparator()
@@ -2618,20 +3109,8 @@ class TrayApp(QSystemTrayIcon):
                 self._preset_menu.addAction(act)
 
     def _apply_tray_preset(self, preset: dict):
-        effect = preset.get("effect", "")
-        if effect:
-            self._driver.set_mode_effect(effect)
-        # Params are applied live; the window doesn't need to be open
-        for cls in ALL_EFFECTS:
-            if cls.name == effect:
-                for attr, p_spec in cls.PARAMS.items():
-                    val = preset.get("params", {}).get(attr)
-                    if val is not None:
-                        if p_spec.get("type") == "text":
-                            self._driver.set_effect_param(attr, str(val))
-                        else:
-                            self._driver.set_effect_param(attr, int(val) / float(p_spec["scale"]))
-                break
+        """Use the same complete preset loader as the main Presets tab."""
+        self._window._preset_panel.apply_preset(preset)
 
     def _on_activate(self, reason):
         if reason == QSystemTrayIcon.Trigger:
@@ -2722,69 +3201,73 @@ def main():
     splash.show()
     splash.set_status("Loading application shell...", 10)
 
-    # Keep one icon alive for the entire process and use it consistently.
-    app_icon = _make_icon()
-    app.setWindowIcon(app_icon)
+    try:
+        # Keep one icon alive for the entire process and use it consistently.
+        app_icon = _make_icon()
+        app.setWindowIcon(app_icon)
 
-    splash.set_status("Loading matrix driver...", 25)
-    driver   = MatrixDriver()
+        splash.set_status("Loading matrix driver...", 25)
+        driver = MatrixDriver()
 
-    splash.set_status("Loading saved settings...", 40)
-    settings = Settings()
+        splash.set_status("Loading saved settings...", 40)
+        settings = Settings()
 
-    splash.set_status("Building quick controls...", 55)
-    qc = QuickControls(driver)
+        splash.set_status("Building quick controls...", 55)
+        qc = QuickControls(driver)
 
-    splash.set_status("Building main window...", 70)
-    window = ControlWindow(driver, settings)
-    window.setWindowIcon(app_icon)
-    qc.setWindowIcon(app_icon)
-    window.sync_quick_controls(qc)
+        splash.set_status("Building main window...", 70)
+        window = ControlWindow(driver, settings)
+        window.setWindowIcon(app_icon)
+        qc.setWindowIcon(app_icon)
+        window.sync_quick_controls(qc)
 
-    splash.set_status("Preparing system tray...", 82)
-    tray = TrayApp(driver, qc, window)
-    tray.setIcon(app_icon)
-    tray._stable_icon = app_icon
-    tray.show()
+        splash.set_status("Preparing system tray...", 82)
+        tray = TrayApp(driver, qc, window)
+        tray.setIcon(app_icon)
+        tray._stable_icon = app_icon
+        tray.show()
 
-    splash.set_status("Finalizing startup...", 92)
-    if settings.get_start_minimized():
-        window.hide()
-    else:
-        window.show()
-        window.raise_()
-        window.activateWindow()
+        splash.set_status("Finalizing startup...", 92)
+        if settings.get_start_minimized():
+            window.hide()
+        else:
+            window.show()
+            window.raise_()
+            window.activateWindow()
 
-    # Auto-connect whether the main window is visible or minimized to tray.
-    QTimer.singleShot(500, window._connect)
+        # Auto-connect whether the main window is visible or minimized.
+        QTimer.singleShot(500, window._connect)
 
-    # Main tick timer
-    last_t = [time.monotonic()]
-    def _tick():
-        now  = time.monotonic()
-        dt   = now - last_t[0]
-        last_t[0] = now
-        driver.tick(dt)
-        window.update_debug_info(dt)
+        last_t = [time.monotonic()]
 
-    timer = QTimer()
-    timer.setInterval(TICK_MS)
-    timer.timeout.connect(_tick)
-    timer.start()
+        def _tick():
+            now = time.monotonic()
+            dt = now - last_t[0]
+            last_t[0] = now
+            driver.tick(dt)
+            window.update_debug_info(dt)
 
-    splash.set_status("Ready", 100)
+        timer = QTimer()
+        timer.setInterval(TICK_MS)
+        timer.timeout.connect(_tick)
+        timer.start()
 
-    # Keep the splash visible for at least four seconds so startup never
-    # appears to flash by suspiciously fast.
-    elapsed_ms = int((time.monotonic() - splash_started) * 1000)
-    remaining_ms = max(0, 4000 - elapsed_ms)
-    splash.finish_later(remaining_ms)
+        splash.set_status("Ready", 100)
 
-    # Silent auto-update check disabled for faster startup and no dev-build nagging.
-    # Manual checking is still available from the Check Updates button.
-    # QTimer.singleShot(3000, lambda: check_for_updates(window, silent=True))
+        elapsed_ms = int(
+            (time.monotonic() - splash_started) * 1000
+        )
+        remaining_ms = max(0, 4000 - elapsed_ms)
+        splash.finish_later(remaining_ms)
 
-    sys.exit(app.exec())
+        sys.exit(app.exec())
+
+    except BaseException as exc:
+        log_path = _write_startup_crash_log(
+            type(exc), exc, exc.__traceback__
+        )
+        splash.show_error(exc, log_path)
+        sys.exit(app.exec())
 
 
 if __name__ == "__main__":
