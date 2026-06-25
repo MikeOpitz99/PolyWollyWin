@@ -1,3 +1,6 @@
+## v3.0.0
+- fixing installer
+
 ## v2.9
 - adding minimize to tray function on boot
 

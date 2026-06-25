@@ -4,7 +4,7 @@
 #define MyAppURL "https://github.com/MikeOpitz99/PolyWollyWin"
 #define MyAppExeName "PolyWollyWin.exe"
 #define SourceRoot "D:\programming\PolyWollyWin"
-#define DistDir "D:\programming\PolyWollyWin\dist"
+#define DistDir "D:\programming\PolyWollyWin\dist\PolyWollyWin"
 #define ReleaseDir "D:\programming\PolyWollyWin\releases"
 
 [Setup]
@@ -26,15 +26,17 @@ RestartApplications=no
 OutputDir={#ReleaseDir}
 OutputBaseFilename=PolyWollyWin-v{#MyAppVersion}-Setup
 SetupIconFile={#SourceRoot}\assets\pww.ico
-Compression=lzma
+
+; Inno compresses the complete PyInstaller onedir folder.
+Compression=lzma2/ultra64
 SolidCompression=yes
+LZMAUseSeparateProcess=yes
+
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 PrivilegesRequired=lowest
-
-
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -44,7 +46,9 @@ Name: "startup"; Description: "Run {#MyAppName} when Windows starts"; GroupDescr
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "{#DistDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; Copy the complete PyInstaller onedir build.
+Source: "{#DistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
 Source: "{#SourceRoot}\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "{#SourceRoot}\CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
@@ -70,7 +74,9 @@ Filename: "taskkill"; \
     Flags: runhidden; RunOnceId: "KillPolyWollyWin"
 
 [UninstallDelete]
-Type: files; Name: "{app}\PolyWollyWin.exe"
+; Inno normally removes installed files automatically.
+; This cleans any leftovers inside the private dependency folder.
+Type: filesandordirs; Name: "{app}\_internal"
 Type: files; Name: "{app}\README.md"
 Type: files; Name: "{app}\CHANGELOG.md"
 Type: files; Name: "{app}\LICENSE"
