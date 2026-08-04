@@ -22,17 +22,25 @@ ENV/
 build/
 dist/
 builds/
+releases/*
+!releases/.gitkeep
 *.manifest
 *.pyz
 
-# Logs and temp
+# Root-level generated release archives and executables
+/*.exe
+/*.zip
+/*.7z
+
+# Logs, temp files, and generated listings
 *.log
 *.tmp
 *.pid
 temp/
 tmp/
+/polywollywindirs.txt
 
-# IDE/editor noise
+# IDE and editor noise
 .vscode/
 .idea/
 *.suo
@@ -45,20 +53,14 @@ desktop.ini
 Desktop.ini
 Thumbs.db
 
-# Packet/device captures
+# Packet and device captures
 *.pcap
 *.pcapng
 
-# Private scripts, protected in case they are accidentally copied into the repo
+# Private scripts, protected in case they are copied into the repo
 ReleasePolyWollyWin.bat
 build_exe.bat
 *_PRIVATE.bat
 
-# IMPORTANT:
-# PolyWollyWin.spec and PolyWollyWin.iss are intentionally NOT ignored.
-# They belong in the public repo.
-
-# Release binaries belong in GitHub Releases, not Git history
-releases/*.exe
-releases/*.zip
-releases/*.7z
+# Public build configuration
+# PolyWollyWin.spec and PolyWollyWin.iss are intentionally not ignored.

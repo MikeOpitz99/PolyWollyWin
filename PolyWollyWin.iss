@@ -3,18 +3,20 @@
 #define MyAppPublisher "Mike Opitz"
 #define MyAppURL "https://github.com/MikeOpitz99/PolyWollyWin"
 #define MyAppExeName "PolyWollyWin.exe"
-#define SourceRoot "D:\programming\PolyWollyWin"
-#define DistDir "D:\programming\PolyWollyWin\dist\PolyWollyWin"
-#define ReleaseDir "D:\programming\PolyWollyWin\releases"
+
+; SourcePath is the directory containing this .iss file.
+#define SourceRoot SourcePath
+#define DistDir AddBackslash(SourcePath) + "dist\PolyWollyWin"
+#define ReleaseDir AddBackslash(SourcePath) + "releases"
 
 [Setup]
 AppId={{B9F2A3C1-4D7E-4F8A-9B2C-1E3D5F7A9B0C}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-AppCopyright=Copyright (C) 2024 Mike Opitz
+AppCopyright=Copyright (C) 2026 Mike Opitz
 AppPublisherURL={#MyAppURL}
-AppSupportURL={#MyAppURL}
+AppSupportURL={#MyAppURL}/issues
 AppUpdatesURL={#MyAppURL}/releases
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
@@ -31,10 +33,18 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 
 WizardStyle=modern
+ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 PrivilegesRequired=lowest
+
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription=Direct AniMe Matrix controller for the ROG Strix Flare II Animate
+VersionInfoCopyright=Copyright (C) 2026 Mike Opitz
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -45,10 +55,10 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "{#DistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
 Source: "{#SourceRoot}\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "{#SourceRoot}\CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceRoot}\ACKNOWLEDGEMENTS.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
@@ -75,4 +85,5 @@ Type: filesandordirs; Name: "{app}\_internal"
 Type: files; Name: "{app}\README.md"
 Type: files; Name: "{app}\CHANGELOG.md"
 Type: files; Name: "{app}\LICENSE"
+Type: files; Name: "{app}\ACKNOWLEDGEMENTS.md"
 Type: dirifempty; Name: "{app}"
