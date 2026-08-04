@@ -12,7 +12,7 @@ PolyWollyWin talks directly to the keyboard over USB HID, so the matrix can run 
 
 Get the installer or portable build from the [GitHub Releases page](https://github.com/MikeOpitz99/PolyWollyWin/releases).
 
-**Current version:** 3.0.2
+**Current version:** 3.0.3
 
 PolyWollyWin is currently tested only with:
 
@@ -84,7 +84,7 @@ Most effects expose live parameters in the Effects tab. Changes are applied whil
 ### Recommended: installer
 
 1. Open the [Releases page](https://github.com/MikeOpitz99/PolyWollyWin/releases).
-2. Download `PolyWollyWin-v3.0.2-Setup.exe`.
+2. Download `PolyWollyWin-v3.0.3-Setup.exe`.
 3. Run the installer.
 4. Close Armoury Crate if it is holding the keyboard interface.
 5. Start PolyWollyWin.
@@ -260,7 +260,7 @@ PolyWollyWin-vX.X.X-Setup.exe
 
 ### The app closes but remains in Task Manager
 
-Version 3.0.2 includes a shutdown watchdog so blocked audio or HID cleanup cannot leave the process running indefinitely.
+Version 3.0.3 includes a shutdown watchdog so blocked audio or HID cleanup cannot leave the process running indefinitely.
 
 ### Windows warns about the installer
 

@@ -1,6 +1,17 @@
 # Changelog
 
 Notable changes to PolyWollyWin are recorded here.
+## v3.0.3
+
+### Changed
+
+- Prepared the repository for public users and contributors.
+- Rebuilt the README with installation, build, troubleshooting, and hardware support information.
+- Added hardware-porting and contribution documentation.
+- Added bug, feature, and hardware-port issue templates.
+- Made the Inno Setup build independent of local drive paths.
+- Separated runtime, optional, and development dependencies.
+- Cleaned the licence, acknowledgements, changelog, and repository contents.
 
 ## v3.0.2
 
