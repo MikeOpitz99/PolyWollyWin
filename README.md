@@ -1,5 +1,7 @@
 # PolyWollyWin
 
+[![Windows build check](https://github.com/MikeOpitz99/PolyWollyWin/actions/workflows/windows-build-check.yml/badge.svg)](https://github.com/MikeOpitz99/PolyWollyWin/actions/workflows/windows-build-check.yml)
+
 An open-source Windows controller for the **ASUS ROG Strix Flare II Animate** AniMe Matrix display.
 
 PolyWollyWin talks directly to the keyboard over USB HID, so the matrix can run effects, images, GIFs, drawing tools, text, sequences, and audio-reactive visuals without Armoury Crate controlling the display.
@@ -136,6 +138,7 @@ Without the optional packages:
 | `PolyWollyWin.spec` | Optimized PyInstaller ONEDIR build |
 | `PolyWollyWin.iss` | Inno Setup installer definition |
 | `HARDWARE_PORTING.md` | Guide for adapting the transport and geometry to other hardware |
+| `tools/flare2_matrix_test.py` | Standalone HID protocol and matrix diagnostic |
 
 ## Confirmed HID protocol
 

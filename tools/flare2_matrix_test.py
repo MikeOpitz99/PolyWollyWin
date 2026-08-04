@@ -1,8 +1,8 @@
 """
-flare2_send.py — ROG Strix Flare II Animate matrix driver
-Protocol reverse-engineered from live USBPcap capture.
+flare2_matrix_test.py - ROG Strix Flare II Animate matrix diagnostic
+Protocol confirmed from a reference USBPcap capture.
 
-CONFIRMED WIRE FORMAT (from pickledick.pcap):
+CONFIRMED WIRE FORMAT:
   Endpoint: 7 OUT (usage_page=0xFF02, MI_04)
   Packet size: 1024 bytes
   

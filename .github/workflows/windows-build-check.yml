@@ -1,0 +1,71 @@
+name: Windows build check
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-build-check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build PolyWollyWin
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-optional.txt
+            requirements-dev.txt
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install project and build dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Compile tracked Python files
+        shell: pwsh
+        run: |
+          $files = @(& git ls-files "*.py")
+          if ($files.Count -eq 0) {
+            throw "No tracked Python files were found."
+          }
+
+          & python -m py_compile @files
+          if ($LASTEXITCODE -ne 0) {
+            throw "Python compilation failed."
+          }
+
+      - name: Build the ONEDIR application
+        run: pyinstaller --clean --noconfirm PolyWollyWin.spec
+
+      - name: Verify the packaged executable
+        shell: pwsh
+        run: |
+          $exe = "dist\PolyWollyWin\PolyWollyWin.exe"
+
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw "Expected packaged executable was not created: $exe"
+          }
+
+          Get-Item -LiteralPath $exe |
+            Select-Object FullName, Length, LastWriteTime
