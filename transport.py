@@ -29,6 +29,10 @@ class Transport:
     # ------------------------------------------------------------------ #
 
     def connect(self) -> str:
+        # Never reuse a handle that may have survived a USB power-cycle in
+        # Python but is no longer valid in Windows/hidapi.
+        self.disconnect()
+
         devs   = hid.enumerate(VID, PID)
         target = next(
             (d for d in devs if d.get("usage_page", 0) == USAGE_PAGE),
@@ -39,9 +43,20 @@ class Transport:
                 "ROG Strix Flare II Animate matrix interface not found.\n"
                 "Is the keyboard plugged in? (VID=0x0B05 PID=0x19FC usage_page=0xFF02)"
             )
-        self._path = target["path"]
-        self._dev  = hid.device()
-        self._dev.open_path(self._path)
+        path = target["path"]
+        dev = hid.device()
+        try:
+            dev.open_path(path)
+        except Exception:
+            try:
+                dev.close()
+            except Exception:
+                pass
+            raise
+
+        # Publish the new connection only after open_path succeeds.
+        self._path = path
+        self._dev = dev
         return self._path.decode(errors="replace") if isinstance(self._path, bytes) else str(self._path)
 
     def disconnect(self):
@@ -66,7 +81,18 @@ class Transport:
             raise RuntimeError("Not connected")
         buf = payload[:PAYLOAD_SIZE]
         buf += [0x00] * (PAYLOAD_SIZE - len(buf))
-        return self._dev.write([0x00] + buf)   # hidapi report-ID prefix
+        try:
+            written = self._dev.write([0x00] + buf)  # hidapi report-ID prefix
+        except Exception as exc:
+            # A HID object can remain non-None after sleep, a USB controller
+            # reset, or unplug/replug even though its OS handle is dead.
+            self.disconnect()
+            raise RuntimeError("HID write failed; connection was invalidated") from exc
+
+        if written <= 0:
+            self.disconnect()
+            raise RuntimeError("HID write returned no data; connection was invalidated")
+        return written
 
     # ------------------------------------------------------------------ #
     # Public API

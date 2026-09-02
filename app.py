@@ -1374,6 +1374,8 @@ class MatrixDriver(QObject):
     status_changed = Signal(str)
     frame_rendered  = Signal(list)
 
+    RECONNECT_INTERVAL_S = 1.0
+
     MODE_BLANK  = "blank"
     MODE_EFFECT = "effect"
     MODE_GIF    = "gif"
@@ -1385,6 +1387,9 @@ class MatrixDriver(QObject):
         super().__init__()
         self._transport  = Transport()
         self._lock       = threading.Lock()
+        self._want_connected = False
+        self._next_reconnect_at = 0.0
+        self._reconnect_notice_sent = False
         self.mode        = self.MODE_BLANK
         self._effect:  BaseEffect | None = None
         self._gif:     GifPlayer  | None = None
@@ -1414,15 +1419,29 @@ class MatrixDriver(QObject):
     # ── connection ────────────────────────────────────────────────────
 
     def connect(self) -> str | None:
+        self._want_connected = True
+        self._next_reconnect_at = 0.0
+        return self._connect_transport(report_error=True)
+
+    def _connect_transport(self, report_error: bool) -> str | None:
         try:
             path = self._transport.connect()
+            self._next_reconnect_at = 0.0
+            self._reconnect_notice_sent = False
             self.status_changed.emit("connected")
             return path
         except Exception as e:
-            self.status_changed.emit(f"error: {e}")
+            self._next_reconnect_at = (
+                time.monotonic() + self.RECONNECT_INTERVAL_S
+            )
+            if report_error:
+                self.status_changed.emit(f"error: {e}")
             return None
 
     def disconnect(self):
+        self._want_connected = False
+        self._next_reconnect_at = 0.0
+        self._reconnect_notice_sent = False
         self._transport.disconnect()
         self.status_changed.emit("disconnected")
 
@@ -1597,7 +1616,12 @@ class MatrixDriver(QObject):
 
     def tick(self, dt: float):
         if not self._transport.connected:
-            return
+            if not self._want_connected:
+                return
+            if time.monotonic() < self._next_reconnect_at:
+                return
+            if self._connect_transport(report_error=False) is None:
+                return
 
         with self._lock:
             mode    = self.mode
@@ -1663,7 +1687,12 @@ class MatrixDriver(QObject):
         try:
             self._transport.send_frame(raw)
         except Exception:
-            pass
+            self._next_reconnect_at = (
+                time.monotonic() + self.RECONNECT_INTERVAL_S
+            )
+            if not self._reconnect_notice_sent:
+                self._reconnect_notice_sent = True
+                self.status_changed.emit("reconnecting")
         self.frame_rendered.emit(raw)
 
     @staticmethod
@@ -1680,6 +1709,9 @@ class MatrixDriver(QObject):
             return 1.0
 
     def cleanup(self):
+        # Cleanup is intentional. Do not reconnect while the app is exiting.
+        self._want_connected = False
+        self._next_reconnect_at = 0.0
         with self._lock:
             if isinstance(self._effect,  (AudioVisualizer, TypingEffect)): self._effect.stop()
             if isinstance(self._effect2, (AudioVisualizer, TypingEffect)): self._effect2.stop()
@@ -2919,8 +2951,14 @@ class ControlWindow(QWidget):
 
     def _on_status(self, s: str):
         if s == "connected":
+            self._status.setText("⬤ Connected")
             self._status.setStyleSheet("color:#e8001d;")
             self._conn_btn.setText("Disconnect")
+            self._conn_btn.setEnabled(True)
+        elif s == "reconnecting":
+            self._status.setText("⬤ Reconnecting…")
+            self._status.setStyleSheet("color:#f80;")
+            self._conn_btn.setText("Reconnect now")
             self._conn_btn.setEnabled(True)
         elif s == "disconnected":
             self._status.setText("⬤ Disconnected")

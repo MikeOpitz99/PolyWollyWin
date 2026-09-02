@@ -1,6 +1,18 @@
+## v3.25.0
+- Pushing Suspend fix - once windows returns from locked state, PWW should continue as it was.
+
 # Changelog
 
 Notable changes to PolyWollyWin are recorded here.
+
+## Unreleased
+
+### Fixed
+
+- Added automatic HID reconnection after Windows sleep, workstation lock related USB resets, and keyboard unplug/replug events.
+- Invalidated stale HID handles after failed writes instead of silently retrying a dead connection forever.
+- Restored the active matrix frame automatically when the keyboard becomes available again.
+
 ## v3.0.3
 
 ### Changed
